@@ -1111,3 +1111,98 @@ def test_excess_species_mechanism_rejected_without_altering_input(
     config = analytic_configuration(str(path), points=2)
     with pytest.raises(ValueError):  # noqa: PT011
         candidate.simulate_module(config)
+
+
+@pytest.mark.parametrize("phase", ["gas", "surface"])
+def test_excess_reactions_rejected_then_valid_call_recovers(
+    analytic_mechanism, tmp_path, phase
+):
+    """“气相最多 8 个物种、20 个反应，表面最多 8 个物种、30 个反应。”
+
+    Explicit duplicate reactions remain valid Cantera chemistry while crossing
+    only one reaction-count boundary. Source strengths are disabled so a
+    missing size check cannot hide behind a numerical convergence failure.
+    A valid invocation then checks recovery in the same candidate worker.
+    """
+    original = Path(analytic_mechanism).read_text()
+    prefix, reactions = original.split("gas-reactions:\n", 1)
+    gas_block, surface_block = reactions.split("surface-reactions:\n", 1)
+    gas_repeated = (
+        "- equation: A => B\n  duplicate: true\n"
+        "  rate-constant: {A: 0.4, b: 0, Ea: 0}\n"
+    ) * 21
+    surface_repeated = (
+        "- equation: A + S => AS\n  duplicate: true\n"
+        "  rate-constant: {A: 200, b: 0, Ea: 0}\n"
+    ) * 31
+    blocks = {
+        "gas": (gas_repeated, surface_block),
+        "surface": (gas_block, surface_repeated),
+    }[phase]
+    path = tmp_path / "excess-reactions.yaml"
+    path.write_text(
+        prefix + "gas-reactions:\n" + blocks[0] + "surface-reactions:\n" + blocks[1]
+    )
+    gas = ct.Solution(str(path), "gas")
+    surface = ct.Interface(str(path), "catalyst", adjacent=[gas])
+    assert gas.n_species == surface.n_species == 3
+    assert {"gas": gas.n_reactions, "surface": surface.n_reactions}[phase] == {
+        "gas": 21,
+        "surface": 31,
+    }[phase]
+    invalid = analytic_configuration(str(path), points=2)
+    with pytest.raises(ValueError):  # noqa: PT011
+        candidate.simulate_module(invalid)
+    recovered = run(analytic_configuration(analytic_mechanism, points=2))
+    assert np.array(
+        [p["retentate"]["temperature_K"] for p in recovered["profiles"]]
+    ) == pytest.approx([700.0, 700.0], abs=4e-4)
+    assert np.array(
+        [p["retentate"]["species_flow_kmol_s"]["A"] for p in recovered["profiles"]]
+    ) == pytest.approx([4e-7, 4e-7], rel=5e-6)
+
+
+@pytest.mark.parametrize("phase", ["gas", "surface"])
+def test_loadable_unsupported_phase_rejected_then_valid_call_recovers(
+    analytic_mechanism, tmp_path, phase
+):
+    """“不支持的相模型或超出上述机理规模、非法接法或坐标序列应抛 `ValueError`。”
+
+    These mechanisms load in trusted Cantera before invoking the candidate:
+    a Redlich-Kwong gas and a coverage-dependent surface are real supported
+    Cantera models outside this task's ideal-gas/ideal-surface contract.
+    """
+    original = Path(analytic_mechanism).read_text()
+    real_gas = original.replace("thermo: ideal-gas", "thermo: Redlich-Kwong")
+    for composition in ("{H: 2}", "{Ar: 1}"):
+        marker = "  composition: " + composition + "\n"
+        real_gas = real_gas.replace(
+            marker,
+            marker
+            + "  equation-of-state: {model: Redlich-Kwong, a: [1.0e-6, 0.0], b: 1.0e-8}\n",
+        )
+    changed = {
+        "gas": real_gas,
+        "surface": original.replace(
+            "thermo: ideal-surface", "thermo: coverage-dependent-surface"
+        ),
+    }[phase]
+    path = tmp_path / "unsupported-model.yaml"
+    path.write_text(changed)
+    gas = ct.Solution(str(path), "gas")
+    surface = ct.Interface(str(path), "catalyst", adjacent=[gas])
+    assert {"gas": gas.thermo_model, "surface": surface.thermo_model}[phase] == {
+        "gas": "Redlich-Kwong",
+        "surface": "coverage-dependent-surface",
+    }[phase]
+    assert gas.n_species == surface.n_species == 3
+    invalid = analytic_configuration(str(path), points=2)
+    with pytest.raises(ValueError):  # noqa: PT011
+        candidate.simulate_module(invalid)
+    recovered = run(analytic_configuration(analytic_mechanism, points=2))
+    assert np.array(
+        [p["retentate"]["temperature_K"] for p in recovered["profiles"]]
+    ) == pytest.approx([700.0, 700.0], abs=4e-4)
+    assert np.array(
+        [p["retentate"]["species_flow_kmol_s"]["A"] for p in recovered["profiles"]]
+    ) == pytest.approx([4e-7, 4e-7], rel=5e-6)

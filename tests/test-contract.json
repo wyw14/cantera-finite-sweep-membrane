@@ -58,7 +58,11 @@
     "test_reactor.py::test_surface_weak_link_reaches_unique_attracting_distribution[eight-decade-separation]",
     "test_reactor.py::test_surface_weak_link_reaches_unique_attracting_distribution[twenty-decade-separation]",
     "test_reactor.py::test_excess_species_mechanism_rejected_without_altering_input[gas]",
-    "test_reactor.py::test_excess_species_mechanism_rejected_without_altering_input[surface]"
+    "test_reactor.py::test_excess_species_mechanism_rejected_without_altering_input[surface]",
+    "test_reactor.py::test_excess_reactions_rejected_then_valid_call_recovers[gas]",
+    "test_reactor.py::test_excess_reactions_rejected_then_valid_call_recovers[surface]",
+    "test_reactor.py::test_loadable_unsupported_phase_rejected_then_valid_call_recovers[gas]",
+    "test_reactor.py::test_loadable_unsupported_phase_rejected_then_valid_call_recovers[surface]"
   ],
   "test_files_sha256": {
     "candidate_proxy.py": "654fac1006049256d862493010215c0fec9eec67aca06bbe621a0ae866dbe161",
@@ -69,7 +73,7 @@
     "independent_fv.py": "d2da07d104a2727366f1cb2484c26e601ba51ad43f5a8f96095a538923d0df84",
     "pytest.ini": "1c4ea57d78b41c8cdb046467d2069100704adaadfd72025e54ea5c0e1010092c",
     "requirements-test.txt": "512657e574994ee3094aa35f5482cce0d052c589d6ad049e69836bbc9d939695",
-    "test_reactor.py": "c1459f21fab3ab5d23bb302577e3a7c06bdb096fe81c75a65472ed4878808400",
+    "test_reactor.py": "75223daf4bfe9b01eca25a317161a4d6c3c01778f24ea02e3ce2a5667d36e76b",
     "test.sh": "e2a3b4a518afce146021503f4f01e7afd8833a5ef83aedbc02e355daac7d5c43",
     "trusted_runner.py": "c155fca30a759ae96dea144804370e97c51b1686fbbc747c1ecf5e69caa9fe27",
     "wheels-sha256.txt": "5449bf76235bdd76ddc6a5dae7db6cb9436e22ea692007be30e491f2b5822c35",
