@@ -1,15 +1,12 @@
-"""Only trusted test code runs here. The candidate is reached through RPC."""
-import json
-import os
-from pathlib import Path
-import sys
+"""Record trusted pytest CLI results; candidate code executes only through RPC."""
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-os.environ['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
-import pytest
+import json
+from pathlib import Path
+
 
 class Ledger:
+    """Keep exact test identities and all three phases for the score supervisor."""
+
     def __init__(self, output):
         self.output = Path(output)
         self.collected = []
@@ -31,11 +28,9 @@ class Ledger:
             'outcomes': self.outcomes, 'collection_errors': self.collection_errors,
             'exitstatus': int(exitstatus)}, indent=2), encoding='utf-8')
 
-if __name__ == '__main__':
-    output = sys.argv[1]
-    args = [str(HERE), '-q', '-p', 'no:cacheprovider', '--tb=short',
-            '-c', str(HERE / 'pytest.ini'), '--confcutdir=' + str(HERE), '--rootdir=' + str(HERE)]
-    if len(sys.argv) > 2 and sys.argv[2] == '--collect-only':
-        args.append('--collect-only')
-    result = pytest.main(args, plugins=[Ledger(output)])
-    sys.exit(int(result))
+def pytest_addoption(parser):
+    parser.addoption('--trusted-ledger', required=True, help='Private verifier outcome ledger')
+
+
+def pytest_configure(config):
+    config.pluginmanager.register(Ledger(config.getoption('--trusted-ledger')), 'trusted-ledger')

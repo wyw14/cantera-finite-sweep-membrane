@@ -57,6 +57,8 @@ def cleanup():
 try:
     if os.geteuid() != 0:
         raise RuntimeError('Verifier bootstrap must run as root; candidate runs as nobody')
+    if sys.argv[1:] != ['/usr/local/bin/pytest']:
+        raise RuntimeError('Expected the trusted pytest executable from test.sh')
     manifest = json.loads((HERE / 'test-contract.json').read_text(encoding='utf-8'))
     expected = manifest['nodeids']
     if not expected or len(expected) != len(set(expected)):
@@ -70,9 +72,12 @@ try:
     env = {'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8',
         'HOME': str(private), 'MPLCONFIGDIR': str(private / 'mpl'), 'MPLBACKEND': 'Agg',
         'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1', 'PYTHONDONTWRITEBYTECODE': '1',
-        'PYTEST_DISABLE_PLUGIN_AUTOLOAD': '1', 'CANDIDATE_PID_LEDGER': str(pids)}
+        'PYTEST_DISABLE_PLUGIN_AUTOLOAD': '1', 'CANDIDATE_PID_LEDGER': str(pids),
+        'PYTHONNOUSERSITE': '1', 'PYTHONSAFEPATH': '1', 'PYTHONPATH': str(HERE)}
     with open(LOGS / 'pytest.log', 'wb') as output:
-        process = subprocess.Popen([sys.executable, '-I', str(HERE / 'trusted_runner.py'), str(report)],
+        process = subprocess.Popen([sys.argv[1], str(HERE), '-q', '-p', 'no:cacheprovider',
+            '-p', 'trusted_runner', '--trusted-ledger', str(report), '--tb=short',
+            '-c', str(HERE / 'pytest.ini'), '--confcutdir=' + str(HERE), '--rootdir=' + str(HERE)],
             stdout=output, stderr=subprocess.STDOUT, cwd='/', env=env, start_new_session=True)
         try:
             process.wait(timeout=270)
