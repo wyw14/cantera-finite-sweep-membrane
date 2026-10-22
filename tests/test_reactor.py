@@ -18,20 +18,6 @@ from independent_fv import solve_cells
 MECH = str(Path(__file__).resolve().parent / "data" / "ammonia-Ru-Ba-YSZ-CSM-2019.yaml")
 
 
-def species_mesh_budget(coarse, medium, fine):
-    """Observed second-order error allowance, separate from interface accuracy."""
-    first = np.abs(np.asarray(medium) - np.asarray(coarse))
-    second = np.abs(np.asarray(fine) - np.asarray(medium))
-    # 1e-16 kmol/s resolves cancellation in unchanged inert/zero components;
-    # it is 2e5 times smaller than the stated near-zero species tolerance.
-    floor = 1e-16
-    assert np.all(second <= 0.4 * first + floor)
-    business = 2e-5 * np.abs(fine) + 2e-11
-    # An under-resolved reference is not allowed to inflate the acceptance band.
-    assert np.all(second <= 0.25 * business)
-    return second / 2 + floor
-
-
 def configuration(direction="co-current", points=81):
     """Build a supported ammonia case using the published input fields."""
     return {
@@ -159,38 +145,55 @@ def run(c):
     return r
 
 
+def finite_volume_samples(result, positions):
+    """Interpolate independent cell-boundary solutions at the public grid."""
+    columns = [
+        np.column_stack(
+            [
+                np.interp(
+                    positions, result["positions"], result[side + "_profile"][:, column]
+                )
+                for column in range(result[side + "_profile"].shape[1])
+            ]
+        )
+        for side in ("retentate", "sweep")
+    ]
+    return np.stack(columns, axis=1)
+
+
 @pytest.mark.parametrize("direction", ["co-current", "counter-current"])
 def test_constant_cp_heat_exchanger_closed_form(analytic_mechanism, direction):
-    """Match constant-heat-capacity heat exchange for both inlet arrangements.
+    """“顺流扫气入口也在 z=0，逆流扫气入口则在 z=L。”
 
-    Contract: "模型与工况" defines interchannel heat transfer and the sweep
-    inlet at z=0 or z=L; "输出" sets 0.0004 K accuracy in this limit.
+    Constant-cp analytic energy balances independently fix both temperature
+    profiles, retaining the published 0.0004 K limit at every requested point.
     """
     c = analytic_configuration(analytic_mechanism, direction)
     c["retentate"].update(temperature_K=800.0, mole_fractions={"I": 1.0})
     c["sweep"].update(temperature_K=500.0, mole_fractions={"I": 1.0})
     c["heat"]["interchannel_UA_W_K"] = 0.01
     r = run(c)
-    C1 = 0.02
-    C2 = 0.04
-    U = 0.01
-    if direction == "co-current":
-        for p in r["profiles"]:
-            d = 300 * np.exp(-U * (1 / C1 + 1 / C2) * p["z_m"] / c["length_m"])
-            tr = (C1 * 800 + C2 * 500 + C2 * d) / (C1 + C2)
-            ts = tr - d
-            assert p["retentate"]["temperature_K"] == pytest.approx(tr, abs=4e-4)
-            assert p["sweep"]["temperature_K"] == pytest.approx(ts, abs=4e-4)
-    else:
-        a = U * (1 / C1 - 1 / C2)
-        b = (1 / C1) / (1 / C1 - 1 / C2)
-        d0 = 300 / (b * (1 - np.exp(-a)) + np.exp(-a))
-        for p in r["profiles"]:
-            e = np.exp(-a * p["z_m"] / c["length_m"])
-            tr = 800 - b * d0 * (1 - e)
-            ts = tr - d0 * e
-            assert p["retentate"]["temperature_K"] == pytest.approx(tr, abs=4e-4)
-            assert p["sweep"]["temperature_K"] == pytest.approx(ts, abs=4e-4)
+    position = np.asarray(c["sample_positions_m"]) / c["length_m"]
+    co_difference = 300 * np.exp(-0.01 * (1 / 0.02 + 1 / 0.04) * position)
+    co_r = (0.02 * 800 + 0.04 * 500 + 0.04 * co_difference) / 0.06
+    a = 0.01 * (1 / 0.02 - 1 / 0.04)
+    b = (1 / 0.02) / (1 / 0.02 - 1 / 0.04)
+    d0 = 300 / (b * (1 - np.exp(-a)) + np.exp(-a))
+    exponential = np.exp(-a * position)
+    counter_r = 800 - b * d0 * (1 - exponential)
+    expected_r, expected_s = {
+        "co-current": (co_r, co_r - co_difference),
+        "counter-current": (counter_r, counter_r - d0 * exponential),
+    }[direction]
+    actual = np.array(
+        [
+            [p[side]["temperature_K"] for side in ("retentate", "sweep")]
+            for p in r["profiles"]
+        ]
+    )
+    assert actual.shape == (len(position), 2)
+    assert actual[:, 0] == pytest.approx(expected_r, abs=4e-4), "retentate closed form"
+    assert actual[:, 1] == pytest.approx(expected_s, abs=4e-4), "sweep closed form"
 
 
 @pytest.mark.parametrize("direction", ["co-current", "counter-current"])
@@ -198,266 +201,352 @@ def test_constant_cp_heat_exchanger_closed_form(analytic_mechanism, direction):
 def test_isothermal_pure_species_membrane_exact_flux(
     analytic_mechanism, direction, reverse
 ):
-    """Match signed pure-species permeation and each side's inlet boundary.
+    """“该关系允许负通量。膜面积沿长度均匀分布。”
 
-    Contract: "模型与工况" allows either flux direction and defines both flow
-    arrangements; "输出" specifies per-length transfer and 5e-6 accuracy.
+    A pure species has constant partial pressure, so signed transfer is
+    exactly linear; both inlet locations and both signs are registered cases.
     """
     c = analytic_configuration(analytic_mechanism, direction)
-    for side in ["retentate", "sweep"]:
+    for side in ("retentate", "sweep"):
         c[side]["mole_fractions"] = {"A": 1.0}
-    c["retentate"]["pressure_Pa"] = 8e4 if reverse else 1.2e5
+    c["retentate"]["pressure_Pa"] = {False: 1.2e5, True: 8e4}[reverse]
     c["membrane"].update(area_m2=0.01, permeance_kmol_m2_s_Pa=1e-10)
     r = run(c)
+    x = np.asarray(c["sample_positions_m"]) / c["length_m"]
     transfer = 0.01 * 1e-10 * (c["retentate"]["pressure_Pa"] - 1e5)
-    for p in r["profiles"]:
-        x = p["z_m"] / c["length_m"]
-        assert p["retentate"]["species_flow_kmol_s"]["A"] == pytest.approx(
-            1e-6 - transfer * x, rel=5e-6
-        )
-        progress = x if direction == "co-current" else 1 - x
-        assert p["sweep"]["species_flow_kmol_s"]["A"] == pytest.approx(
-            2e-6 + transfer * progress, rel=5e-6
-        )
-        assert p["membrane_transfer_kmol_s_m"] == pytest.approx(
-            transfer / c["length_m"], rel=5e-6
-        )
-        assert p["retentate"]["temperature_K"] == pytest.approx(700, abs=4e-4)
+    progress = {"co-current": x, "counter-current": 1 - x}[direction]
+    actual_r = np.array(
+        [p["retentate"]["species_flow_kmol_s"]["A"] for p in r["profiles"]]
+    )
+    actual_s = np.array([p["sweep"]["species_flow_kmol_s"]["A"] for p in r["profiles"]])
+    actual_j = np.array([p["membrane_transfer_kmol_s_m"] for p in r["profiles"]])
+    actual_t = np.array(
+        [
+            [p[side]["temperature_K"] for side in ("retentate", "sweep")]
+            for p in r["profiles"]
+        ]
+    )
+    assert actual_t.shape == (len(x), 2)
+    assert actual_r == pytest.approx(1e-6 - transfer * x, rel=5e-6)
+    assert actual_s == pytest.approx(2e-6 + transfer * progress, rel=5e-6)
+    assert actual_j == pytest.approx(
+        np.full(len(x), transfer / c["length_m"]), rel=5e-6
+    )
+    assert actual_t == pytest.approx(np.full((len(x), 2), 700.0), abs=4e-4)
 
 
-def test_homogeneous_isomerization_analytic_decay(analytic_mechanism):
-    """Match finite-rate gas conversion with the specified reacting volume.
+@pytest.mark.parametrize(
+    "product_weight", [0.1, 0.0], ids=["present-product", "zero-inlet-product"]
+)
+def test_homogeneous_isomerization_analytic_decay(analytic_mechanism, product_weight):
+    """“允许某些物种入口为零，不能据此禁止其通过反应生成或穿膜进入。”
 
-    Contract: "模型与工况" scales gas production by the effective volume;
-    "输出" requires 5e-6 relative accuracy for the gas-reaction limit.
+    Equal-thermo first-order isomers give exponential A decay and an exact B
+    gain. The zero-inlet-product case separately covers a legal domain edge.
     """
     c = analytic_configuration(analytic_mechanism)
     c["retentate_void_volume_m3"] = 2e-5
+    c["retentate"]["mole_fractions"] = {
+        "A": 0.4,
+        "B": product_weight,
+        "I": 0.6 - product_weight,
+    }
     r = run(c)
-    F0 = 1e-6
-    Cin = 1e5 / (ct.gas_constant * 700)
-    for p in r["profiles"]:
-        expected = (
-            0.4
-            * F0
-            * np.exp(
-                -0.4
-                * Cin
-                * c["retentate_void_volume_m3"]
-                / F0
-                * p["z_m"]
-                / c["length_m"]
-            )
-        )
-        assert p["retentate"]["species_flow_kmol_s"]["A"] == pytest.approx(
-            expected, rel=5e-6
-        )
+    x = np.asarray(c["sample_positions_m"]) / c["length_m"]
+    expected_a = 0.4e-6 * np.exp(
+        -0.4 * 1e5 / (ct.gas_constant * 700) * c["retentate_void_volume_m3"] / 1e-6 * x
+    )
+    expected_b = product_weight * 1e-6 + 0.4e-6 - expected_a
+    actual = np.array(
+        [
+            [p["retentate"]["species_flow_kmol_s"][name] for name in ("A", "B")]
+            for p in r["profiles"]
+        ]
+    )
+    assert actual.shape == (len(x), 2)
+    assert actual[:, 0] == pytest.approx(expected_a, rel=5e-6)
+    assert actual[:, 1] == pytest.approx(expected_b, rel=5e-6, abs=2e-11)
 
 
 def test_surface_kinetics_analytic_coverage_and_conversion(analytic_mechanism):
-    """Match steady coverages and conversion for a soluble surface mechanism.
+    """“表面吸附物在每个位置达到当地稳态，覆盖度非负且总和为 1”
 
-    Contract: "模型与工况" requires local kinetic surface steady states and
-    catalytic-area scaling; "输出" gives coverage and surface-limit accuracy.
+    The three-site linear kinetic cycle has rational coverages and an
+    integrated conversion relation, independent of any numerical reactor ODE.
     """
     c = analytic_configuration(analytic_mechanism)
     c["catalyst_area_m2"] = 0.08
     r = run(c)
+    x = np.asarray(c["sample_positions_m"]) / c["length_m"]
+    flow = np.array([p["retentate"]["species_flow_kmol_s"]["A"] for p in r["profiles"]])
     q = 200 * 1e5 / (ct.gas_constant * 700 * 1e-6)
-    Fin = 4e-7
-    for p in r["profiles"]:
-        F = p["retentate"]["species_flow_kmol_s"]["A"]
-        a = q * F
-        ts = 1 / (1 + a / 8 * (1 + 5 / 7))
-        ta = a * ts / 8
-        tb = 5 * ta / 7
-        assert set(p["surface_coverages"]) == {"S", "AS", "BS"}
-        np.testing.assert_allclose(
-            [p["surface_coverages"][x] for x in ["S", "AS", "BS"]],
-            [ts, ta, tb],
-            rtol=3e-6,
-            atol=1e-8,
-        )
-        rhs = c["catalyst_area_m2"] * 1e-6 * 5 * q * p["z_m"] / c["length_m"]
-        expected = (
-            Fin
-            if rhs == 0
-            else brentq(
-                # brentq consumes this callback before the next loop iteration.
-                lambda f, rhs=rhs: 8 * np.log(Fin / f) + (12 / 7) * q * (Fin - f) - rhs,
-                Fin / 10,
-                Fin,
+    a = q * flow
+    vacancy = 1 / (1 + a / 8 * (1 + 5 / 7))
+    expected_coverage = np.column_stack(
+        (vacancy, a * vacancy / 8, 5 * a * vacancy / 56)
+    )
+    actual = np.array(
+        [
+            [p["surface_coverages"][name] for name in ("S", "AS", "BS")]
+            for p in r["profiles"]
+        ]
+    )
+    expected_flow = np.array(
+        [
+            brentq(
+                lambda f, rhs=rhs: 8 * np.log(4e-7 / f)
+                + (12 / 7) * q * (4e-7 - f)
+                - rhs,
+                4e-8,
+                4e-7,
                 xtol=1e-18,
             )
-        )
-        assert F == pytest.approx(expected, rel=5e-6)
+            for rhs in c["catalyst_area_m2"] * 1e-6 * 5 * q * x
+        ]
+    )
+    assert all(set(p["surface_coverages"]) == {"S", "AS", "BS"} for p in r["profiles"])
+    assert actual.shape == (len(x), 3)
+    assert actual == pytest.approx(expected_coverage, rel=3e-6, abs=1e-8)
+    assert flow == pytest.approx(expected_flow, rel=5e-6)
+
+
+@pytest.mark.parametrize("rate_scale", [1e-12, 1e-16], ids=["slow", "very-slow"])
+def test_surface_steady_branch_invariant_to_kinetic_time_scale(
+    analytic_mechanism, tmp_path, rate_scale
+):
+    """“按该机理的有限速率动力学充分松弛后的极限定义覆盖度。”
+
+    A common positive multiplier changes the relaxation clock, not the
+    attracting steady state. Analytic coverages expose false convergence from
+    a fixed relaxation horizon or an absolute-rate stopping test alone.
+    """
+    import re
+
+    original = Path(analytic_mechanism).read_text()
+    header, surface = original.split("surface-reactions:\n")
+    scaled = re.sub(
+        r"A: ([0-9.]+)", lambda m: "A: " + str(float(m.group(1)) * rate_scale), surface
+    )
+    mechanism = tmp_path / "slow-surface.yaml"
+    mechanism.write_text(header + "surface-reactions:\n" + scaled)
+    c = analytic_configuration(str(mechanism), points=3)
+    r = run(c)
+    a = 200 * 1e5 * 0.4 / (ct.gas_constant * 700)
+    vacancy = 1 / (1 + a / 8 * (1 + 5 / 7))
+    expected = np.tile([vacancy, a * vacancy / 8, 5 * a * vacancy / 56], (3, 1))
+    actual = np.array(
+        [
+            [p["surface_coverages"][name] for name in ("S", "AS", "BS")]
+            for p in r["profiles"]
+        ]
+    )
+    assert actual.shape == (3, 3)
+    assert actual == pytest.approx(expected, rel=3e-6, abs=1e-8)
 
 
 @pytest.mark.parametrize("direction", ["co-current", "counter-current"])
 def test_real_mechanism_conservation_and_local_thermochemistry(direction):
-    """Check both flow arrangements against the supplied mechanism's physics.
+    """“每侧焓流应与返回的物种流量和温度自洽”
 
-    Contract: "模型与工况" defines the attracting surface branch, signed
-    exchanges and inlet locations; "输出" gives element/enthalpy conservation,
-    coverage, pressure, thermochemical consistency and local-flux tolerances.
+    Reconstruct every sample using a trusted mechanism, independently relax
+    the physical surface from its default, and compare full arrays directly.
+    Element/enthalpy balances, boundaries and local fluxes remain separate.
     """
     c = configuration(direction, 161)
     r = run(c)
     gas = ct.Solution(MECH, "gas")
-    sw = ct.Solution(MECH, "gas")
-    surf = ct.Interface(MECH, "Ru_surface", adjacent=[gas])
+    sweep = ct.Solution(MECH, "gas")
+    surface = ct.Interface(MECH, "Ru_surface", adjacent=[gas])
     relaxed = ct.Interface(MECH, "Ru_surface", adjacent=[gas])
-    default_coverage = relaxed.coverages.copy()
-    signed = 1 if direction == "co-current" else -1
-    totals = []
-    enthalpies = []
-    wall = []
+    initial = relaxed.coverages.copy()
+    signed = {"co-current": 1, "counter-current": -1}[direction]
+    species_names = gas.species_names
+    observed_flow, pressure, enthalpy, computed_h = [], [], [], []
+    totals, total_h, wall, observed_c, expected_c = [], [], [], [], []
+    (
+        residual,
+        relaxed_residual,
+        relaxation_change,
+        expected_j,
+        expected_q,
+        expected_w,
+    ) = ([], [], [], [], [], [])
     for p in r["profiles"]:
-        flows = []
-        hs = []
-        for label, g in [("retentate", gas), ("sweep", sw)]:
-            state = p[label]
-            F = np.array([state["species_flow_kmol_s"][s] for s in g.species_names])
-            assert min(F) >= -1e-14
-            assert sum(F) > 0
-            assert state["pressure_Pa"] == pytest.approx(
-                c[label]["pressure_Pa"], rel=1e-9
+        local_flow, local_h, elemental = [], [], []
+        for side, phase in (("retentate", gas), ("sweep", sweep)):
+            state = p[side]
+            flow = np.array(
+                [state["species_flow_kmol_s"][name] for name in species_names]
             )
-            g.TPX = state["temperature_K"], state["pressure_Pa"], F
-            H = sum(F) * g.enthalpy_mole
-            assert state["enthalpy_flow_W"] == pytest.approx(H, rel=3e-7, abs=1e-7)
-            flows.append(
+            phase.TPX = state["temperature_K"], state["pressure_Pa"], flow
+            h = sum(flow) * phase.enthalpy_mole
+            local_flow.append(flow)
+            local_h.append(h)
+            elemental.append(
                 np.array(
                     [
-                        sum(F[i] * g.n_atoms(i, e) for i in range(g.n_species))
-                        for e in g.element_names
+                        sum(
+                            flow[i] * phase.n_atoms(i, e)
+                            for i in range(phase.n_species)
+                        )
+                        for e in phase.element_names
                     ]
                 )
             )
-            hs.append(H)
-        totals.append(flows[0] + signed * flows[1])
-        enthalpies.append(hs[0] + signed * hs[1])
+            pressure.append(state["pressure_Pa"] / c[side]["pressure_Pa"])
+            enthalpy.append(state["enthalpy_flow_W"])
+            computed_h.append(h)
+        observed_flow.append(local_flow)
+        totals.append(elemental[0] + signed * elemental[1])
+        total_h.append(local_h[0] + signed * local_h[1])
         wall.append(p["wall_heat_W_m"])
-        raw_coverages = p["surface_coverages"]
-        assert isinstance(raw_coverages, dict)
-        assert set(raw_coverages) == set(surf.species_names)
-        assert all(
-            isinstance(v, (int, float))
-            and not isinstance(v, bool)
-            and np.isfinite(v)
-            and v >= 0
-            for v in raw_coverages.values()
+        observed_c.append(
+            [p["surface_coverages"][name] for name in surface.species_names]
         )
-        assert abs(sum(raw_coverages.values()) - 1) < 1e-8
-        surf.TP = gas.T, gas.P
-        surf.coverages = raw_coverages
-        assert max(abs(surf.get_net_production_rates(surf))) / surf.site_density < 2e-6
-        # Independent physical-time branch check: never initialize this surface
-        # from candidate coverage, or an exactly blocked boundary could persist.
+        surface.TP = gas.T, gas.P
+        surface.coverages = p["surface_coverages"]
+        residual.append(
+            max(abs(surface.get_net_production_rates(surface))) / surface.site_density
+        )
         relaxed.TP = gas.T, gas.P
-        relaxed.coverages = default_coverage
+        relaxed.coverages = initial
         relaxed.advance_coverages(1.0, rtol=1e-11, atol=1e-17)
         first = relaxed.coverages.copy()
         relaxed.advance_coverages(1.0, rtol=1e-11, atol=1e-17)
-        expected_coverage = relaxed.coverages.copy()
-        assert np.max(abs(expected_coverage - first)) < 2e-10
-        assert (
+        expected_c.append(relaxed.coverages.copy())
+        relaxation_change.append(max(abs(relaxed.coverages - first)))
+        relaxed_residual.append(
             max(abs(relaxed.get_net_production_rates(relaxed))) / relaxed.site_density
-            < 2e-7
-        )
-        np.testing.assert_allclose(
-            [raw_coverages[name] for name in relaxed.species_names],
-            expected_coverage,
-            rtol=3e-6,
-            atol=1e-8,
         )
         k = gas.species_index("H2")
-        J = (
+        expected_j.append(
             c["membrane"]["area_m2"]
             * c["membrane"]["permeance_kmol_m2_s_Pa"]
             / c["length_m"]
-            * (gas.P * gas.X[k] - sw.P * sw.X[k])
+            * (gas.P * gas.X[k] - sweep.P * sweep.X[k])
         )
-        assert p["membrane_transfer_kmol_s_m"] == pytest.approx(J, rel=5e-6, abs=1e-13)
-        assert p["interchannel_heat_W_m"] == pytest.approx(
-            c["heat"]["interchannel_UA_W_K"] / c["length_m"] * (gas.T - sw.T),
-            rel=5e-6,
-            abs=1e-8,
+        expected_q.append(
+            c["heat"]["interchannel_UA_W_K"] / c["length_m"] * (gas.T - sweep.T)
         )
-        assert p["wall_heat_W_m"] == pytest.approx(
+        expected_w.append(
             c["heat"]["wall_UA_W_K"]
             / c["length_m"]
-            * (c["heat"]["wall_temperature_K"] - gas.T),
-            rel=5e-6,
-            abs=1e-8,
+            * (c["heat"]["wall_temperature_K"] - gas.T)
         )
-    np.testing.assert_allclose(
-        totals, np.tile(totals[0], (len(totals), 1)), rtol=2e-6, atol=2e-12
+    flows, coverages, totals = (
+        np.asarray(observed_flow),
+        np.asarray(observed_c),
+        np.asarray(totals),
     )
-    assert enthalpies[-1] - enthalpies[0] == pytest.approx(
+    assert flows.shape == (161, 2, gas.n_species)
+    assert np.min(flows) >= -1e-14
+    assert np.all(np.sum(flows, axis=-1) > 0)
+    assert np.asarray(pressure) == pytest.approx(np.ones(322), rel=1e-9)
+    assert np.asarray(enthalpy) == pytest.approx(
+        np.asarray(computed_h), rel=3e-7, abs=1e-7
+    )
+    assert all(
+        set(p[side]["species_flow_kmol_s"]) == set(species_names)
+        for p in r["profiles"]
+        for side in ("retentate", "sweep")
+    )
+    assert all(
+        set(p["surface_coverages"]) == set(surface.species_names) for p in r["profiles"]
+    )
+    assert all(
+        isinstance(v, (int, float))
+        and not isinstance(v, bool)
+        and np.isfinite(v)
+        and v >= 0
+        for p in r["profiles"]
+        for v in p["surface_coverages"].values()
+    )
+    assert np.max(abs(np.sum(coverages, axis=-1) - 1)) < 1e-8
+    assert max(residual) < 2e-6, "candidate coverage kinetic residual"
+    assert max(relaxation_change) < 2e-10, "independent physical relaxation convergence"
+    assert max(relaxed_residual) < 2e-7
+    assert coverages == pytest.approx(np.asarray(expected_c), rel=3e-6, abs=1e-8)
+    assert np.asarray(
+        [p["membrane_transfer_kmol_s_m"] for p in r["profiles"]]
+    ) == pytest.approx(np.asarray(expected_j), rel=5e-6, abs=1e-13)
+    assert np.asarray(
+        [p["interchannel_heat_W_m"] for p in r["profiles"]]
+    ) == pytest.approx(np.asarray(expected_q), rel=5e-6, abs=1e-8)
+    assert np.asarray(wall) == pytest.approx(np.asarray(expected_w), rel=5e-6, abs=1e-8)
+    assert totals == pytest.approx(np.tile(totals[0], (161, 1)), rel=2e-6, abs=2e-12)
+    assert total_h[-1] - total_h[0] == pytest.approx(
         np.trapezoid(wall, c["sample_positions_m"]), rel=3e-5, abs=2e-6
     )
-    for label, index in [
-        ("retentate", 0),
-        ("sweep", 0 if direction == "co-current" else -1),
-    ]:
-        g = ct.Solution(MECH, "gas")
-        f = c[label]
-        g.TPX = f["temperature_K"], f["pressure_Pa"], f["mole_fractions"]
-        p = r["profiles"][index][label]
-        assert p["temperature_K"] == pytest.approx(f["temperature_K"], abs=4e-4)
-        np.testing.assert_allclose(
-            [p["species_flow_kmol_s"][x] for x in g.species_names],
-            g.X * f["molar_flow_kmol_s"],
-            rtol=2e-6,
-            atol=1e-13,
-        )
+    inlet_rows = [
+        r["profiles"][0]["retentate"],
+        r["profiles"][{"co-current": 0, "counter-current": -1}[direction]]["sweep"],
+    ]
+    inlet_expected = []
+    for label in ("retentate", "sweep"):
+        feed = c[label]
+        gas.TPX = feed["temperature_K"], feed["pressure_Pa"], feed["mole_fractions"]
+        inlet_expected.append(gas.X * feed["molar_flow_kmol_s"])
+    assert np.array([p["temperature_K"] for p in inlet_rows]) == pytest.approx(
+        [700.0, 650.0], abs=4e-4
+    )
+    assert np.array(
+        [[p["species_flow_kmol_s"][name] for name in species_names] for p in inlet_rows]
+    ) == pytest.approx(np.asarray(inlet_expected), rel=2e-6, abs=1e-13)
 
 
 @pytest.mark.parametrize("direction", ["co-current", "counter-current"])
 def test_independent_finite_volume_grid_convergence(direction):
-    """Check coupled outlet states against a separately converged calculation.
+    """“温度需要达到 0.002 K 绝对精度”
 
-    Contract: "模型与工况" defines the coupled steady model for both flow
-    arrangements; "输出" sets 0.002 K and 2e-5/2e-11 kmol/s accuracy.
-    The reference mesh is checked before it supplies an acceptance allowance.
+    Independent midpoint finite volumes check both outlets. Three meshes must
+    converge before their independently bounded truncation error is used.
     """
     c = configuration(direction, 5)
     r = run(c)
-    coarse = solve_cells(c, 12)
-    medium = solve_cells(c, 24)
-    fine = solve_cells(c, 48)
-    for label, index in [
-        ("retentate_outlet", -1),
-        ("sweep_outlet", -1 if direction == "co-current" else 0),
-    ]:
-        side = "retentate" if label.startswith("retentate") else "sweep"
-        state = r["profiles"][index][side]
-        names = ct.Solution(MECH, "gas").species_names
-        actual = np.r_[
-            [state["species_flow_kmol_s"][x] for x in names], state["temperature_K"]
+    names = ct.Solution(MECH, "gas").species_names
+    actual = np.array(
+        [
+            [
+                [p[side]["species_flow_kmol_s"][x] for x in names]
+                + [p[side]["temperature_K"]]
+                for side in ("retentate", "sweep")
+            ]
+            for p in r["profiles"]
         ]
-        # Independent mesh convergence and agreement, not a stored solver trace.
-        first = abs(medium[label][-1] - coarse[label][-1])
-        second = abs(fine[label][-1] - medium[label][-1])
-        assert second < 0.4 * first + 1e-7
-        assert second < 0.002
-        mesh_allowance = species_mesh_budget(
-            coarse[label][:-1], medium[label][:-1], fine[label][:-1]
-        )
-        flow_error = np.abs(actual[:-1] - fine[label][:-1])
-        flow_limit = 2e-5 * np.abs(fine[label][:-1]) + 2e-11 + mesh_allowance
-        assert np.all(flow_error <= flow_limit), (flow_error, flow_limit)
-        # The observed second-order mesh difference supplies a conservative
-        # half-difference allowance, in addition to the interface's 0.002 K.
-        assert actual[-1] == pytest.approx(fine[label][-1], abs=0.002 + second / 2)
+    )
+    meshes = [solve_cells(c, cells) for cells in (12, 24, 48)]
+    coarse, medium, fine = [
+        finite_volume_samples(m, c["sample_positions_m"]) for m in meshes
+    ]
+    first, second = abs(medium - coarse), abs(fine - medium)
+    business = 2e-5 * abs(fine[..., :-1]) + 2e-11
+    flow_limit = business + second[..., :-1] / 2 + 1e-16
+    assert actual.shape == fine.shape == (5, 2, len(names) + 1)
+    assert np.all(
+        second[..., :-1] <= 0.4 * first[..., :-1] + 1e-16
+    ), "FV species mesh convergence"
+    assert np.all(
+        second[..., :-1] <= 0.25 * business
+    ), "FV uncertainty exceeds species accuracy budget"
+    assert np.all(
+        second[..., -1] < 0.4 * first[..., -1] + 1e-7
+    ), "FV temperature mesh convergence"
+    assert np.all(second[..., -1] < 0.002)
+    assert np.all(abs(actual[..., :-1] - fine[..., :-1]) <= flow_limit), (
+        actual,
+        fine,
+        flow_limit,
+    )
+    assert np.all(
+        abs(actual[..., -1] - fine[..., -1]) <= 0.002 + second[..., -1] / 2
+    ), (actual[..., -1], fine[..., -1])
 
 
 def test_inlet_weight_scaling_and_repeated_call_independence():
-    """Preserve results after weight scaling, reordering and another case.
+    """“连续调用及改变物种字典顺序不能污染结果”
 
-    Contract: "输入" permits unnormalized nonnegative inlet weights;
-    "调用、失败与资源" specifies repeated-call and dictionary-order invariance.
+    Compare all requested rows after an unrelated boundary-value solve and
+    equivalent rescaling/reordering of both inlet weight dictionaries.
     """
     c = configuration(points=5)
     a = run(c)
@@ -465,27 +554,44 @@ def test_inlet_weight_scaling_and_repeated_call_independence():
     other["retentate"]["temperature_K"] = 710.0
     run(other)
     changed = copy.deepcopy(c)
-    for side in ["retentate", "sweep"]:
+    for side in ("retentate", "sweep"):
         changed[side]["mole_fractions"] = {
             k: v * 7.3 for k, v in reversed(list(c[side]["mole_fractions"].items()))
         }
     b = run(changed)
-    # run() already checks each profile count against the same requested grid.
-    for x, y in zip(a["profiles"], b["profiles"], strict=True):
-        for side in ["retentate", "sweep"]:
-            assert x[side]["temperature_K"] == pytest.approx(
-                y[side]["temperature_K"], abs=4e-4
-            )
-            assert x[side]["species_flow_kmol_s"] == pytest.approx(
-                y[side]["species_flow_kmol_s"], rel=3e-6, abs=1e-13
-            )
+    names = ct.Solution(MECH, "gas").species_names
+    temperatures = [
+        np.array(
+            [
+                [p[s]["temperature_K"] for s in ("retentate", "sweep")]
+                for p in result["profiles"]
+            ]
+        )
+        for result in (a, b)
+    ]
+    flows = [
+        np.array(
+            [
+                [
+                    [p[s]["species_flow_kmol_s"][name] for name in names]
+                    for s in ("retentate", "sweep")
+                ]
+                for p in result["profiles"]
+            ]
+        )
+        for result in (a, b)
+    ]
+    assert temperatures[0].shape == temperatures[1].shape == (5, 2)
+    assert temperatures[0] == pytest.approx(temperatures[1], abs=4e-4)
+    assert flows[0].shape == flows[1].shape == (5, 2, len(names))
+    assert flows[0] == pytest.approx(flows[1], rel=3e-6, abs=1e-13)
 
 
 def test_hot_reverse_permeation_uses_donor_enthalpy():
-    """Check coupled outlet states when hot sweep gas permeates in reverse.
+    """“j>0 用反应侧，j<0 用扫气侧。”
 
-    Contract: "模型与工况" requires the donor-side partial molar enthalpy
-    for negative membrane flux; "输出" sets coupled temperature/flow accuracy.
+    Hot hydrogen-bearing sweep transfers energy in reverse; converged,
+    independent cell balances detect choosing the receiver enthalpy instead.
     """
     c = configuration("counter-current", 9)
     c["sweep"].update(
@@ -494,36 +600,46 @@ def test_hot_reverse_permeation_uses_donor_enthalpy():
     c["membrane"]["permeance_kmol_m2_s_Pa"] = 1e-10
     c["catalyst_area_m2"] = 20.0
     r = run(c)
+    names = ct.Solution(MECH, "gas").species_names
+    actual = np.array(
+        [
+            [
+                [p[side]["species_flow_kmol_s"][name] for name in names]
+                + [p[side]["temperature_K"]]
+                for side in ("retentate", "sweep")
+            ]
+            for p in r["profiles"]
+        ]
+    )
+    meshes = [solve_cells(c, cells) for cells in (16, 32, 64)]
+    coarse, medium, fine = [
+        finite_volume_samples(m, c["sample_positions_m"]) for m in meshes
+    ]
+    first, second = abs(medium - coarse), abs(fine - medium)
+    business = 2e-5 * abs(fine[..., :-1]) + 2e-11
+    flow_limit = business + second[..., :-1] / 2 + 1e-16
+    assert len(r["profiles"]) == 9
     assert all(p["membrane_transfer_kmol_s_m"] < 0 for p in r["profiles"])
-    coarse = solve_cells(c, 16)
-    medium = solve_cells(c, 32)
-    independent = solve_cells(c, 64)
-    for label, index in [("retentate_outlet", -1), ("sweep_outlet", 0)]:
-        side = "retentate" if label.startswith("retentate") else "sweep"
-        actual = r["profiles"][index][side]
-        expected = independent[label]
-        names = ct.Solution(MECH, "gas").species_names
-        mesh_allowance = species_mesh_budget(
-            coarse[label][:-1], medium[label][:-1], expected[:-1]
-        )
-        flow_error = np.abs(
-            np.array([actual["species_flow_kmol_s"][x] for x in names]) - expected[:-1]
-        )
-        flow_limit = 2e-5 * np.abs(expected[:-1]) + 2e-11 + mesh_allowance
-        assert np.all(flow_error <= flow_limit), (flow_error, flow_limit)
-        mesh_difference = abs(expected[-1] - medium[label][-1])
-        assert mesh_difference < 0.4 * abs(medium[label][-1] - coarse[label][-1]) + 1e-7
-        assert mesh_difference < 0.003
-        assert actual["temperature_K"] == pytest.approx(
-            expected[-1], abs=0.002 + mesh_difference / 2
-        )
+    assert actual.shape == fine.shape == (9, 2, len(names) + 1)
+    assert np.all(second[..., :-1] <= 0.4 * first[..., :-1] + 1e-16)
+    assert np.all(second[..., :-1] <= 0.25 * business)
+    assert np.all(abs(actual[..., :-1] - fine[..., :-1]) <= flow_limit), (
+        actual,
+        fine,
+        flow_limit,
+    )
+    assert np.all(second[..., -1] < 0.4 * first[..., -1] + 1e-7)
+    assert np.all(second[..., -1] < 0.003)
+    assert np.all(
+        abs(actual[..., -1] - fine[..., -1]) <= 0.002 + second[..., -1] / 2
+    ), (actual[..., -1], fine[..., -1])
 
 
 def test_default_mechanism_and_json_cli_are_consistent():
-    """Return consistent profiles for explicit defaults, omissions and stdin.
+    """“命令行入口从标准输入读取 config 并输出结果 JSON。”
 
-    Contract: "输入" defines default mechanism/phase values;
-    "调用、失败与资源" requires a JSON stdin/stdout command-line interface.
+    Omitted defaults and the public stdin entry must reproduce explicit
+    defaults. Compare temperatures, species and enthalpy as complete arrays.
     """
     explicit = configuration("counter-current", 5)
     trusted = run(explicit)
@@ -534,48 +650,322 @@ def test_default_mechanism_and_json_cli_are_consistent():
     command = run_cli(json.dumps(default), timeout=60)
     assert command.returncode == 0, command.stderr
     cli = json.loads(command.stdout)
+    names = ct.Solution(MECH, "gas").species_names
+    results = (trusted, implicit, cli)
+    positions = [[p["z_m"] for p in result["profiles"]] for result in results]
+    temperatures = [
+        np.array(
+            [
+                [p[s]["temperature_K"] for s in ("retentate", "sweep")]
+                for p in result["profiles"]
+            ]
+        )
+        for result in results
+    ]
+    flows = [
+        np.array(
+            [
+                [
+                    [p[s]["species_flow_kmol_s"][name] for name in names]
+                    for s in ("retentate", "sweep")
+                ]
+                for p in result["profiles"]
+            ]
+        )
+        for result in results
+    ]
+    enthalpies = [
+        np.array(
+            [
+                [p[s]["enthalpy_flow_W"] for s in ("retentate", "sweep")]
+                for p in result["profiles"]
+            ]
+        )
+        for result in results
+    ]
     assert cli["flow_direction"] == default["flow_direction"]
-    assert len(cli["profiles"]) == len(trusted["profiles"])
-    for result in (implicit, cli):
-        # Counts were checked above or by run() against the requested grid.
-        for actual, expected in zip(
-            result["profiles"], trusted["profiles"], strict=True
-        ):
-            assert actual["z_m"] == expected["z_m"]
-            for side in ("retentate", "sweep"):
-                assert actual[side]["temperature_K"] == pytest.approx(
-                    expected[side]["temperature_K"], abs=0.0004
-                )
-                assert actual[side]["species_flow_kmol_s"] == pytest.approx(
-                    expected[side]["species_flow_kmol_s"], rel=3e-6, abs=1e-13
-                )
-                assert actual[side]["enthalpy_flow_W"] == pytest.approx(
-                    expected[side]["enthalpy_flow_W"], rel=3e-7, abs=1e-7
-                )
+    assert positions == [c for c in [default["sample_positions_m"]] * 3]
+    assert temperatures[1] == pytest.approx(temperatures[0], abs=4e-4)
+    assert temperatures[2] == pytest.approx(temperatures[0], abs=4e-4)
+    assert flows[1] == pytest.approx(flows[0], rel=3e-6, abs=1e-13)
+    assert flows[2] == pytest.approx(flows[0], rel=3e-6, abs=1e-13)
+    assert enthalpies[1] == pytest.approx(enthalpies[0], rel=3e-7, abs=1e-7)
+    assert enthalpies[2] == pytest.approx(enthalpies[0], rel=3e-7, abs=1e-7)
 
 
 @pytest.mark.parametrize(
-    "change",
-    ["negative-flow", "unknown-species", "bad-direction", "bad-grid", "bool-pressure"],
+    "path,value",
+    [
+        pytest.param(("sweep", "molar_flow_kmol_s"), -1, id="negative-flow"),
+        pytest.param(
+            ("retentate", "mole_fractions", "not-species"), 0, id="unknown-species"
+        ),
+        pytest.param(("flow_direction",), "parallel", id="bad-direction"),
+        pytest.param(("sample_positions_m",), [0, 0.05, 0.04], id="bad-grid"),
+        pytest.param(("sweep", "pressure_Pa"), True, id="bool-pressure"),
+        pytest.param(
+            ("retentate", "temperature_K"), float("nan"), id="nan-temperature"
+        ),
+        pytest.param(("membrane", "area_m2"), float("inf"), id="infinite-area"),
+        pytest.param(
+            ("retentate", "mole_fractions"), {"NH3": -1.0}, id="negative-weight"
+        ),
+        pytest.param(
+            ("retentate", "mole_fractions"), {"NH3": 0.0}, id="zero-total-weight"
+        ),
+        pytest.param(("membrane", "species"), "unknown", id="unknown-membrane-species"),
+        pytest.param(
+            ("mechanism",),
+            "missing-unloadable-mechanism.yaml",
+            id="unloadable-mechanism",
+        ),
+        pytest.param(("gas_phase",), "missing-gas-phase", id="unknown-gas-phase"),
+        pytest.param(
+            ("surface_phase",), "missing-surface-phase", id="unknown-surface-phase"
+        ),
+        pytest.param(("sample_positions_m",), [0.0], id="too-few-samples"),
+        pytest.param(
+            ("sample_positions_m",), [0.0, 0.049], id="wrong-final-coordinate"
+        ),
+    ],
 )
-def test_invalid_configuration_is_rejected(change):
-    """Reject each declared invalid input with ValueError.
+def test_invalid_configuration_is_rejected(path, value):
+    """“缺字段、非法数值、未知物种、不能加载的机理/相”
 
-    Contract: "输入" requires positive flow, known species, declared flow
-    direction, an increasing grid and non-boolean numbers;
-    "调用、失败与资源" specifies the exception type, but not message text.
+    Each original rejected-input case is registered explicitly. All execute
+    the same ValueError assertion; no branch can silently omit the check.
+    The contract specifies the exception class, not the private message text.
     """
     c = configuration(points=3)
-    if change == "negative-flow":
-        c["sweep"]["molar_flow_kmol_s"] = -1
-    elif change == "unknown-species":
-        c["retentate"]["mole_fractions"]["not-species"] = 0
-    elif change == "bad-direction":
-        c["flow_direction"] = "parallel"
-    elif change == "bad-grid":
-        c["sample_positions_m"] = [0, 0.05, 0.04]
-    else:
-        c["sweep"]["pressure_Pa"] = True
-    # Only the exception type is contractual; do not require private wording.
+    parent = c
+    for field in path[:-1]:
+        parent = parent[field]
+    parent[path[-1]] = value
     with pytest.raises(ValueError):  # noqa: PT011
         candidate.simulate_module(c)
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "length_m",
+        "catalyst_area_m2",
+        "retentate_void_volume_m3",
+        "flow_direction",
+        "sample_positions_m",
+        "retentate",
+        "sweep",
+        "membrane",
+        "heat",
+    ],
+)
+def test_missing_required_field_rejected_before_clean_recovery(
+    analytic_mechanism, missing
+):
+    """“缺字段、非法数值、未知物种、不能加载的机理/相”
+
+    All required top-level fields are exercised. A following cheap, valid
+    analytic call in the same worker must retain the specified result.
+    """
+    valid = analytic_configuration(analytic_mechanism, points=2)
+    broken = copy.deepcopy(valid)
+    del broken[missing]
+    with pytest.raises(ValueError):  # noqa: PT011
+        candidate.simulate_module(broken)
+    recovered = run(valid)
+    assert len(recovered["profiles"]) == 2
+    assert np.array(
+        [p["retentate"]["temperature_K"] for p in recovered["profiles"]]
+    ) == pytest.approx([700.0, 700.0], abs=4e-4)
+    assert np.array(
+        [p["retentate"]["species_flow_kmol_s"]["A"] for p in recovered["profiles"]]
+    ) == pytest.approx([4e-7, 4e-7], rel=5e-6)
+
+
+@pytest.mark.parametrize("count", [2, 201])
+def test_output_schema_and_valid_tuple_coordinate_boundaries(analytic_mechanism, count):
+    """“返回值由普通 Python 数据结构和有限数值组成，支持 JSON”
+
+    Exercise both legal sample-count edges with tuple input. Check each
+    declared structure, complete species sets, finite non-boolean numbers,
+    and exact requested coordinates before comparing their physical values.
+    No dictionary key order or JSON byte layout is imposed.
+    """
+    c = analytic_configuration(analytic_mechanism, points=count)
+    c["sample_positions_m"] = tuple(c["sample_positions_m"])
+    result = candidate.simulate_module(c)
+    assert type(result) is dict
+    assert set(result) == {"flow_direction", "profiles"}
+    assert type(result["flow_direction"]) is str
+    assert result["flow_direction"] == c["flow_direction"]
+    assert type(result["profiles"]) is list
+    assert len(result["profiles"]) == count
+    points = result["profiles"]
+    point_fields = {
+        "z_m",
+        "retentate",
+        "sweep",
+        "surface_coverages",
+        "membrane_transfer_kmol_s_m",
+        "interchannel_heat_W_m",
+        "wall_heat_W_m",
+    }
+    side_fields = {
+        "temperature_K",
+        "pressure_Pa",
+        "species_flow_kmol_s",
+        "enthalpy_flow_W",
+    }
+    assert all(type(p) is dict and set(p) == point_fields for p in points)
+    assert all(
+        type(p[s]) is dict and set(p[s]) == side_fields
+        for p in points
+        for s in ("retentate", "sweep")
+    )
+    assert all(
+        type(p[s]["species_flow_kmol_s"]) is dict
+        and set(p[s]["species_flow_kmol_s"]) == {"A", "B", "I"}
+        for p in points
+        for s in ("retentate", "sweep")
+    )
+    assert all(
+        type(p["surface_coverages"]) is dict
+        and set(p["surface_coverages"]) == {"S", "AS", "BS"}
+        for p in points
+    )
+    numbers = [
+        p[k]
+        for p in points
+        for k in (
+            "z_m",
+            "membrane_transfer_kmol_s_m",
+            "interchannel_heat_W_m",
+            "wall_heat_W_m",
+        )
+    ]
+    numbers += [
+        p[s][k]
+        for p in points
+        for s in ("retentate", "sweep")
+        for k in ("temperature_K", "pressure_Pa", "enthalpy_flow_W")
+    ]
+    numbers += [
+        v
+        for p in points
+        for s in ("retentate", "sweep")
+        for v in p[s]["species_flow_kmol_s"].values()
+    ]
+    numbers += [v for p in points for v in p["surface_coverages"].values()]
+    assert all(type(v) in (int, float) and np.isfinite(v) for v in numbers)
+    assert tuple(p["z_m"] for p in points) == c["sample_positions_m"]
+    encoded = json.dumps(result, allow_nan=False)
+    assert json.loads(encoded) == result
+
+
+@pytest.mark.parametrize(
+    "slow_rate",
+    [1e-8, 1e-20],
+    ids=["eight-decade-separation", "twenty-decade-separation"],
+)
+def test_surface_weak_link_reaches_unique_attracting_distribution(
+    analytic_mechanism, tmp_path, slow_rate
+):
+    """“在机理守恒约束确定的可达状态空间内局部吸引”
+
+    Four reversible, equal-thermo surface states have exact uniform limiting
+    coverage. A weak link separates two fast pairs but cannot be discarded
+    based on the aggregate fast-reaction turnover or a fixed time horizon.
+    This is a rate-scale correctness boundary, not the main industrial task.
+    """
+    header = """units: {length: m, quantity: kmol, time: s, activation-energy: J/kmol}
+phases:
+- name: gas
+  thermo: ideal-gas
+  kinetics: gas
+  elements: [Ar]
+  species: [I]
+  reactions: none
+- name: catalyst
+  thermo: ideal-surface
+  adjacent-phases: [gas]
+  elements: [Pt]
+  species: [S, AS, BS, CS]
+  kinetics: surface
+  reactions: [surface-reactions]
+  site-density: 1e-6
+species:
+- name: I
+  composition: {Ar: 1}
+  thermo: {model: constant-cp, T0: 300, h0: 0, s0: 0, cp0: 20000}
+"""
+    states = "".join(
+        "- name: " + name + "\n  composition: {Pt: 1}\n  thermo: {model: constant-cp}\n"
+        for name in ("S", "AS", "BS", "CS")
+    )
+    reactions = "surface-reactions:\n" + "".join(
+        "- equation: "
+        + left
+        + " <=> "
+        + right
+        + "\n  rate-constant: {A: "
+        + str(rate)
+        + ", b: 0, Ea: 0}\n"
+        for left, right, rate in (
+            ("S", "AS", 1.0),
+            ("AS", "BS", slow_rate),
+            ("BS", "CS", 1.0),
+        )
+    )
+    path = tmp_path / "four-state.yaml"
+    path.write_text(header + states + reactions)
+    c = analytic_configuration(str(path), points=2)
+    for side in ("retentate", "sweep"):
+        c[side]["mole_fractions"] = {"I": 1.0}
+    c["membrane"]["species"] = "I"
+    result = run(c)
+    actual = np.array(
+        [
+            [p["surface_coverages"][name] for name in ("S", "AS", "BS", "CS")]
+            for p in result["profiles"]
+        ]
+    )
+    assert actual.shape == (2, 4)
+    assert actual == pytest.approx(np.full((2, 4), 0.25), rel=3e-6, abs=1e-8)
+
+
+@pytest.mark.parametrize("phase", ["gas", "surface"])
+def test_excess_species_mechanism_rejected_without_altering_input(
+    analytic_mechanism, tmp_path, phase
+):
+    """“气相最多 8 个物种、20 个反应，表面最多 8 个物种、30 个反应。”
+
+    Add six chemically inert species to one three-species phase. The YAML
+    remains loadable; rejection therefore checks the declared size boundary.
+    """
+    original = Path(analytic_mechanism).read_text()
+    new_names = ["EXTRA" + str(i) for i in range(6)]
+    old_species, composition = {
+        "gas": ("A, B, I", "Ar"),
+        "surface": ("S, AS, BS", "Pt"),
+    }[phase]
+    changed = original.replace(
+        "species: [" + old_species + "]",
+        "species: [" + old_species + ", " + ", ".join(new_names) + "]",
+    )
+    inserted = "".join(
+        "- name: "
+        + name
+        + "\n  composition: {"
+        + composition
+        + ": 1}\n  thermo: {model: constant-cp}\n"
+        for name in new_names
+    )
+    changed = changed.replace("gas-reactions:\n", inserted + "gas-reactions:\n")
+    path = tmp_path / "oversize.yaml"
+    path.write_text(changed)
+    gas = ct.Solution(str(path), "gas")
+    surface = ct.Interface(str(path), "catalyst", adjacent=[gas])
+    assert {"gas": gas.n_species, "surface": surface.n_species}[phase] == 9
+    config = analytic_configuration(str(path), points=2)
+    with pytest.raises(ValueError):  # noqa: PT011
+        candidate.simulate_module(config)

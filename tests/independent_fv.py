@@ -168,6 +168,9 @@ def solve_cells(c, cells):
     for i in range(cells):
         exchange((R[i] + R[i + 1]) / 2, (S[i] + S[i + 1]) / 2, validate=True)
     return {
+        "positions": np.linspace(0, c["length_m"], cells + 1),
+        "retentate_profile": np.column_stack((R[:, :n] * ref, R[:, -1] * 700.0)),
+        "sweep_profile": np.column_stack((S[:, :n] * ref, S[:, -1] * 700.0)),
         "retentate_outlet": np.r_[R[-1, :n] * ref, R[-1, -1] * 700.0],
         "sweep_outlet": np.r_[
             (S[-1] if c["flow_direction"] == "co-current" else S[0])[:n] * ref,

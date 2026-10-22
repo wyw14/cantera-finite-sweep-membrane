@@ -256,7 +256,12 @@ def run_cli(input, timeout=20):
             process.communicate(input.encode("utf-8"), timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             os.killpg(process.pid, signal.SIGKILL)
-            process.wait()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired as cleanup_error:
+                raise RuntimeError(
+                    "Candidate CLI did not terminate after SIGKILL"
+                ) from cleanup_error
             raise TimeoutError("Candidate CLI deadline exceeded") from exc
         out.seek(0)
         err.seek(0)
