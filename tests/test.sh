@@ -6,6 +6,7 @@ JUNIT_REPORT=/logs/verifier/junit.xml
 workspace=
 stage=bootstrap
 pytest_status=125
+pytest_observed=0
 finalized=0
 active_group=
 watchdog_group=
@@ -58,7 +59,11 @@ reset_reward() {
         unsafe=1
     fi
     temporary="$(mktemp /logs/verifier/.reward-bootstrap-XXXXXXXX)" || return 1
-    if ! printf '0\n' > "$temporary" || ! chmod 0600 "$temporary"; then
+    printf '0\n' > "$temporary" || {
+        rm -f -- "$temporary"
+        return 1
+    }
+    if ! chmod 0600 "$temporary"; then
         rm -f -- "$temporary"
         return 1
     fi
@@ -114,10 +119,8 @@ finish() {
         wait "$watchdog_group" 2>/dev/null || true
     fi
     if [[ "$shell_status" != 0 ]]; then
-        if [[ "$stage" != interrupted ]]; then
-            stage=shell_failure
-        fi
-        pytest_status="$shell_status"
+        # A later completion check may exit 1 after the test process timed
+        # out with 124. Keep the observed test status and actual failed stage.
         finalized=0
     fi
     if [[ "$finalized" != 1 ]]; then
@@ -141,7 +144,9 @@ finish() {
 }
 interrupt() {
     stage=interrupted
-    pytest_status="$1"
+    if [[ "$pytest_observed" != 1 ]]; then
+        pytest_status="$1"
+    fi
     finalized=0
     exit "$1"
 }
@@ -194,6 +199,7 @@ exit 0
 ' trusted-pytest "$workspace" "$JUNIT_REPORT"
 mapfile -t statuses < "$workspace/stage-status.txt"
 pytest_status="${statuses[0]}"
+pytest_observed=1
 if [[ "${statuses[1]}" != 0 ]]; then
     stage=log_capture
 fi
