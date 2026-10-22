@@ -1,0 +1,4 @@
+services:
+  main:
+    # Reap orphaned workers after the outer pytest process is terminated.
+    init: true
