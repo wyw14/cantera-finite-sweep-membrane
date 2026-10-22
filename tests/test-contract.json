@@ -69,13 +69,13 @@
     "candidate_sandbox.py": "75ab2164351d619835da5147be0c49457e54a197c2c26d4c49505ddb2f310386",
     "candidate_worker.py": "6df7dbc7c0800f979b1df4237973dcb7b6cdccdf9bdcabeeccaf228e3fd344f2",
     "data/ammonia-Ru-Ba-YSZ-CSM-2019.yaml": "48c16d6a62828108b7e733d157b267ce1f9da7bab3bf205b0e7ef38d9582b1aa",
-    "grade.py": "44d8e4faf2a79ae1272aeb90cddea67ea75b540680ceec85bae991eadccc79f7",
+    "grade.py": "fa119c6dae7f929870f96c8a312523bac15da8adfd2402059f2b6e770fffc1c2",
     "independent_fv.py": "d2da07d104a2727366f1cb2484c26e601ba51ad43f5a8f96095a538923d0df84",
     "pytest.ini": "1c4ea57d78b41c8cdb046467d2069100704adaadfd72025e54ea5c0e1010092c",
     "requirements-test.txt": "512657e574994ee3094aa35f5482cce0d052c589d6ad049e69836bbc9d939695",
     "test_reactor.py": "75223daf4bfe9b01eca25a317161a4d6c3c01778f24ea02e3ce2a5667d36e76b",
-    "test.sh": "e2a3b4a518afce146021503f4f01e7afd8833a5ef83aedbc02e355daac7d5c43",
-    "trusted_runner.py": "c155fca30a759ae96dea144804370e97c51b1686fbbc747c1ecf5e69caa9fe27",
+    "test.sh": "148325464d18c37b4bd5f2f2a5fd8597846d520b7569cbf50b5347f41fdf5970",
+    "trusted_runner.py": "0ce2a2f31d722ef67026e4a2cdb5932e16bff65c2f99889672a8876c90798ca0",
     "wheels-sha256.txt": "5449bf76235bdd76ddc6a5dae7db6cb9436e22ea692007be30e491f2b5822c35",
     "wheels/colorama-0.4.6-py2.py3-none-any.whl": "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
     "wheels/iniconfig-2.3.1-py3-none-any.whl": "9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7",
@@ -83,6 +83,7 @@
     "wheels/pluggy-1.7.0-py3-none-any.whl": "7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec",
     "wheels/pygments-2.21.0-py3-none-any.whl": "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9",
     "wheels/pytest-9.0.2-py3-none-any.whl": "711ffd45bf766d5264d487b917733b453d917afd2b0ad65223959f59089f875b",
-    "wire_codec.py": "3d61ba0574574b7bbe36dfc26ffa0e57b4d94b16b78c3e91b24c64ffa343e7dc"
+    "wire_codec.py": "3d61ba0574574b7bbe36dfc26ffa0e57b4d94b16b78c3e91b24c64ffa343e7dc",
+    "validate_completion.py": "891649679593b1730e6418bc9541826d7e120a33b62146c71ac740efd2f53ec2"
   }
 }

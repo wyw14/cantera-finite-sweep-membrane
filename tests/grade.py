@@ -17,10 +17,10 @@ import stat
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 
 HERE = Path(__file__).resolve().parent
 LOGS = Path("/logs/verifier")
-EXPECTED_PHASES = [["setup", "passed"], ["call", "passed"], ["teardown", "passed"]]
 
 
 def atomic_write(path: Path, text: str) -> None:
@@ -78,7 +78,7 @@ def contract() -> dict:
 
 def prepare(workspace: Path) -> None:
     """Check isolation and integrity before the shell launches pytest."""
-    record = {"verifier_version": "pytest-cli-v2", "reward": 0, "timed_out": False}
+    record = {"verifier_version": "pytest-cli-v3", "reward": 0, "timed_out": False}
     state = {"started_monotonic": time.monotonic(), "record": record}
     try:
         LOGS.mkdir(parents=True, exist_ok=True)
@@ -125,13 +125,19 @@ def cleanup(workspace: Path) -> None:
                     pass
 
 
-def finalize(workspace: Path, pytest_status: int, stage: str) -> None:
+def finalize(workspace: Path, pytest_status: int, stage: str, junitxml: Path) -> None:
     """Accept only the exact full test collection and all three passing phases."""
-    record = {"verifier_version": "pytest-cli-v2", "reward": 0, "timed_out": False}
+    record = {
+        "verifier_version": "pytest-cli-v3",
+        "reward": 0,
+        "timed_out": False,
+        "completion_state": "INCOMPLETE",
+    }
     started = time.monotonic()
     try:
         state = json.loads((workspace / "state.json").read_text(encoding="utf-8"))
         record.update(state["record"])
+        record["verifier_version"] = "pytest-cli-v3"
         started = state["started_monotonic"]
         record["reward"] = 0
         record["completed_stage"] = stage
@@ -150,34 +156,30 @@ def finalize(workspace: Path, pytest_status: int, stage: str) -> None:
             raise RuntimeError("Trusted pytest report is missing or oversized")
         data = json.loads(report.read_text(encoding="utf-8"))
         write_json(LOGS / "outcomes.json", data)
-        expected = state["expected"]
-        collected, outcomes = data["collected"], data["outcomes"]
-        record["collected_tests"] = len(collected)
-        record["completed_tests"] = len(outcomes)
-        record["passed_tests"] = sum(
-            phases == EXPECTED_PHASES for phases in outcomes.values()
-        )
-        complete = (
-            not data["collection_errors"]
-            and sorted(collected) == sorted(expected)
-            and set(outcomes) == set(expected)
-        )
-        record["collection_complete"] = complete
+        if junitxml != LOGS / "junit.xml":
+            raise RuntimeError("JUnit output must use the trusted verifier path")
         if (
-            complete
-            and not record["timed_out"]
-            and pytest_status == data["exitstatus"] == 0
-            and record["passed_tests"] == len(expected)
+            junitxml.is_symlink()
+            or not junitxml.is_file()
+            or not 0 < junitxml.stat().st_size <= 10_000_000
         ):
-            record["reward"] = 1
+            raise RuntimeError("JUnit report is missing, unsafe, or oversized")
+        sys.path.insert(0, str(HERE))
+        from validate_completion import validate_report
+
+        record.update(
+            validate_report(manifest, data, ET.parse(junitxml), pytest_status)
+        )
     except Exception as error:
         record["reward"] = 0
+        record["completion_state"] = "INCOMPLETE"
         record["grader_error"] = type(error).__name__ + ": " + str(error)
     finally:
         try:
             cleanup(workspace)
         except Exception as error:
             record["reward"] = 0
+            record["completion_state"] = "INCOMPLETE"
             record["cleanup_error"] = type(error).__name__ + ": " + str(error)
         record["elapsed_seconds"] = time.monotonic() - started
         publish(record)
@@ -190,6 +192,7 @@ def main() -> None:
     parser.add_argument("workspace", type=Path, nargs="?")
     parser.add_argument("--pytest-status", type=int, default=125)
     parser.add_argument("--stage", default="prepare")
+    parser.add_argument("--junitxml", type=Path, default=LOGS / "junit.xml")
     arguments = parser.parse_args()
     if arguments.action == "initialize":
         initialize()
@@ -198,7 +201,12 @@ def main() -> None:
     elif arguments.action == "prepare":
         prepare(arguments.workspace)
     else:
-        finalize(arguments.workspace, arguments.pytest_status, arguments.stage)
+        finalize(
+            arguments.workspace,
+            arguments.pytest_status,
+            arguments.stage,
+            arguments.junitxml,
+        )
 
 
 if __name__ == "__main__":

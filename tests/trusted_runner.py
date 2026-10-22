@@ -13,6 +13,8 @@ class Ledger:
         self.collected = []
         self.outcomes = {}
         self.collection_errors = []
+        self.failures = []
+        self.warnings = []
 
     def pytest_collection_finish(self, session):
         """Record exact identities after collection has completed."""
@@ -28,6 +30,20 @@ class Ledger:
         self.outcomes.setdefault(report.nodeid, []).append(
             [report.when, report.outcome]
         )
+        if report.failed:
+            self.failures.append(
+                {
+                    "nodeid": report.nodeid,
+                    "phase": report.when,
+                    "outcome": report.outcome,
+                }
+            )
+
+    def pytest_warning_recorded(self, warning_message, when, nodeid, location):
+        """Keep observed warnings as diagnostics without changing acceptance."""
+        self.warnings.append(
+            {"message": str(warning_message.message), "when": when, "nodeid": nodeid}
+        )
 
     def pytest_sessionfinish(self, session, exitstatus):
         """Write the complete session ledger for the independent finalizer."""
@@ -38,6 +54,8 @@ class Ledger:
                     "outcomes": self.outcomes,
                     "collection_errors": self.collection_errors,
                     "exitstatus": int(exitstatus),
+                    "failures": self.failures,
+                    "warnings": self.warnings,
                 },
                 indent=2,
             ),

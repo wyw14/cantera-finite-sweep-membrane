@@ -2,6 +2,7 @@
 set -euo pipefail
 umask 077
 reward=/logs/verifier/reward.txt
+JUNIT_REPORT=/logs/verifier/junit.xml
 workspace=
 stage=bootstrap
 pytest_status=125
@@ -86,6 +87,23 @@ seal_reward() {
     chmod 0444 "$reward"
 }
 
+clear_reports() {
+    # Reports from an earlier run cannot establish completion of this run.
+    local path
+    for path in /logs/verifier/junit.xml /logs/verifier/outcomes.json \
+        /logs/verifier/grading.json /logs/verifier/completion.json \
+        /logs/verifier/preflight.json /logs/verifier/pytest.log; do
+        if [[ -L "$path" || ( -e "$path" && ! -f "$path" ) ]]; then
+            printf 'Unsafe existing verifier report: %s\n' "$path" >&2
+            return 1
+        fi
+        if [[ -f "$path" ]]; then
+            chmod 0600 "$path" || return 1
+            rm -- "$path" || return 1
+        fi
+    done
+}
+
 finish() {
     local shell_status=$?
     trap - EXIT HUP INT TERM
@@ -103,11 +121,13 @@ finish() {
         finalized=0
     fi
     if [[ "$finalized" != 1 ]]; then
+        printf 'INCOMPLETE: verifier did not finish during %s\n' "$stage" >&2
         reset_reward || shell_status=1
         if [[ -n "$workspace" && -d "$workspace" ]]; then
             if ! /usr/bin/timeout --signal=TERM --kill-after=1s 2s \
                 /usr/local/bin/python -I /tests/grade.py finalize "$workspace" \
-                    --pytest-status "$pytest_status" --stage "$stage"; then
+                    --pytest-status "$pytest_status" --stage "$stage" \
+                    --junitxml "$JUNIT_REPORT"; then
                 reset_reward || shell_status=1
             fi
         fi
@@ -135,6 +155,7 @@ trap 'interrupt 143' TERM
 setsid /bin/bash -c 'sleep 295; kill -TERM "$1"' watchdog "$$" &
 watchdog_group=$!
 reset_reward
+clear_reports
 run_stage /usr/bin/timeout --signal=TERM --kill-after=2s 15s \
     /usr/local/bin/python -I /tests/grade.py initialize
 workspace="$(mktemp -d /tmp/trusted-verifier-XXXXXXXX)"
@@ -155,6 +176,7 @@ run_stage /usr/bin/timeout --signal=TERM --kill-after=2s 278s \
     /bin/bash -c '
 set +e
 workspace="$1"
+JUNIT_REPORT="$2"
 env -i PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 HOME="$workspace" \
     MPLCONFIGDIR="$workspace/mpl" MPLBACKEND=Agg OPENBLAS_NUM_THREADS=1 \
     OMP_NUM_THREADS=1 PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 \
@@ -163,12 +185,13 @@ env -i PATH=/usr/local/bin:/usr/bin:/bin LANG=C.UTF-8 HOME="$workspace" \
     /usr/bin/timeout --signal=TERM --kill-after=5s 270s \
     /usr/local/bin/pytest /tests/test_reactor.py -q --tb=short \
     -p no:cacheprovider -p trusted_runner --trusted-ledger "$workspace/outcomes.json" \
+    --junitxml="$JUNIT_REPORT" \
     -c /tests/pytest.ini --confcutdir=/tests --rootdir=/tests \
     2>&1 | tee /logs/verifier/pytest.log
 statuses=("${PIPESTATUS[@]}")
 printf "%s\\n" "${statuses[@]}" > "$workspace/stage-status.txt"
 exit 0
-' trusted-pytest "$workspace"
+' trusted-pytest "$workspace" "$JUNIT_REPORT"
 mapfile -t statuses < "$workspace/stage-status.txt"
 pytest_status="${statuses[0]}"
 if [[ "${statuses[1]}" != 0 ]]; then
@@ -176,5 +199,30 @@ if [[ "${statuses[1]}" != 0 ]]; then
 fi
 run_stage /usr/bin/timeout --signal=TERM --kill-after=2s 15s \
     /usr/local/bin/python -I /tests/grade.py finalize "$workspace" \
-    --pytest-status "$pytest_status" --stage "$stage"
+    --pytest-status "$pytest_status" --stage "$stage" --junitxml "$JUNIT_REPORT"
+stage=completion_validation
+test -s "$JUNIT_REPORT"
+test -s /logs/verifier/outcomes.json
+test -s /logs/verifier/grading.json
+# Re-open the actual pytest report in the outer supervisor. This independent
+# seal checks report identity, every test phase, and the published reward.
+run_stage /usr/bin/timeout --signal=TERM --kill-after=1s 5s \
+    /usr/local/bin/python -I -c '
+import sys
+from pathlib import Path
+import xml.etree.ElementTree as ET
+sys.path.insert(0, "/tests")
+from grade import write_json
+from validate_completion import validate_seal
+logs = Path("/logs/verifier")
+try:
+    tree = ET.parse(sys.argv[1])
+    record = validate_seal(Path("/tests/test-contract.json"), logs, tree)
+except Exception as error:
+    record = {"completion_state": "INCOMPLETE", "error": str(error)}
+    write_json(logs / "completion.json", record)
+    print("INCOMPLETE: " + str(error), file=sys.stderr)
+    raise SystemExit(1)
+write_json(logs / "completion.json", record)
+' "$JUNIT_REPORT"
 finalized=1
