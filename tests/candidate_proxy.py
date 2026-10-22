@@ -19,6 +19,10 @@ HERE = Path(__file__).resolve().parent
 PROCESSES = []
 
 
+class RemoteCandidateError(Exception):
+    """A candidate exception outside the declared built-in exception families."""
+
+
 def kill_all():
     """Stop tracked candidate groups at trusted pytest process exit."""
     for process in PROCESSES:
@@ -199,7 +203,7 @@ class Candidate:
                 "TypeError": TypeError,
                 "RuntimeError": RuntimeError,
                 "NotImplementedError": NotImplementedError,
-            }.get(answer.get("exception"), RuntimeError)
+            }.get(answer.get("exception"), RemoteCandidateError)
             raise kind(answer.get("message", "Candidate exception"))
         if answer.get("ok") is not True:
             raise RuntimeError("Invalid candidate response")

@@ -12,6 +12,31 @@ from candidate_sandbox import restrict
 
 MAX_WIRE = 16 * 1024 * 1024
 
+# Preserve built-in exception identities before loading untrusted application code.
+_EXCEPTION_FAMILIES = (
+    ("NotImplementedError", NotImplementedError),
+    ("ValueError", ValueError),
+    ("TypeError", TypeError),
+    ("RuntimeError", RuntimeError),
+)
+_IS_SUBCLASS = issubclass
+_EXCEPTION_TYPE = type
+
+
+def exception_response(exc):
+    """Preserve Python exception inheritance across the JSON process boundary."""
+    family = None
+    for name, base in _EXCEPTION_FAMILIES:
+        if _IS_SUBCLASS(_EXCEPTION_TYPE(exc), base):
+            family = name
+            break
+    return {
+        "ok": False,
+        "exception": family,
+        "exception_type": _EXCEPTION_TYPE(exc).__name__,
+        "message": str(exc)[:2000],
+    }
+
 
 def main():
     """Apply mandatory isolation before loading or executing candidate code."""
@@ -63,11 +88,7 @@ def main():
             value = getattr(candidate, request["function"])(*args, **kwargs)
             message = {"ok": True, "value": pack(value)}
         except Exception as exc:
-            message = {
-                "ok": False,
-                "exception": type(exc).__name__,
-                "message": str(exc)[:2000],
-            }
+            message = exception_response(exc)
         message["args_after"] = pack(args)
         message["kwargs_after"] = pack(kwargs)
         response.write(
