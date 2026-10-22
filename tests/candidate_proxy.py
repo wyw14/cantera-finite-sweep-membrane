@@ -49,6 +49,9 @@ class Candidate:
         os.chown(self.scratch, 65534, 65534)
         self.inputs = self.folder / "inputs"
         self.inputs.mkdir(mode=0o755)
+        # The verifier keeps a restrictive umask; explicitly publish only this
+        # directory so the unprivileged worker can traverse its input files.
+        self.inputs.chmod(0o755)
         self.abi = None
         self.sandbox_policy = None
 

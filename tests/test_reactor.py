@@ -198,14 +198,20 @@ def test_constant_cp_heat_exchanger_closed_form(analytic_mechanism, direction):
 
 @pytest.mark.parametrize("direction", ["co-current", "counter-current"])
 @pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize(
+    "permuted", [False, True], ids=["original-species", "permuted-species"]
+)
 def test_isothermal_pure_species_membrane_exact_flux(
-    analytic_mechanism, direction, reverse
+    analytic_mechanism, direction, reverse, permuted
 ):
     """“该关系允许负通量。膜面积沿长度均匀分布。”
 
     A pure species has constant partial pressure, so signed transfer is
     exactly linear; both inlet locations and both signs are registered cases.
     """
+    mechanism = Path(analytic_mechanism)
+    species_order = {False: "[A, B, I]", True: "[I, A, B]"}[permuted]
+    mechanism.write_text(mechanism.read_text().replace("[A, B, I]", species_order))
     c = analytic_configuration(analytic_mechanism, direction)
     for side in ("retentate", "sweep"):
         c[side]["mole_fractions"] = {"A": 1.0}
@@ -266,6 +272,67 @@ def test_homogeneous_isomerization_analytic_decay(analytic_mechanism, product_we
     assert actual.shape == (len(x), 2)
     assert actual[:, 0] == pytest.approx(expected_a, rel=5e-6)
     assert actual[:, 1] == pytest.approx(expected_b, rel=5e-6, abs=2e-11)
+
+
+@pytest.mark.parametrize("direction", ["co-current", "counter-current"])
+def test_membrane_enters_species_absent_from_receiver(analytic_mechanism, direction):
+    """“允许某些物种入口为零，不能据此禁止其通过反应生成或穿膜进入。”
+
+    A pure donor and an inert sweep at equal pressure give a scalar exact
+    balance: accumulated transfer plus its square divided by twice the inert
+    flow equals area times permeance times pressure times axial progress.
+    Both inlet arrangements retain a strictly positive total flow.
+    """
+    c = analytic_configuration(analytic_mechanism, direction)
+    c["retentate"]["mole_fractions"] = {"A": 1.0}
+    c["sweep"]["mole_fractions"] = {"I": 1.0}
+    c["membrane"].update(area_m2=0.01, permeance_kmol_m2_s_Pa=1e-10)
+    result = run(c)
+    x = np.asarray(c["sample_positions_m"]) / c["length_m"]
+    inert = 2e-6
+    driving = 0.01 * 1e-10 * 1e5
+    total = 2 * driving * inert / (np.sqrt(inert**2 + 2 * driving * inert) + inert)
+    co_transfer = (
+        2 * driving * inert * x / (np.sqrt(inert**2 + 2 * driving * inert * x) + inert)
+    )
+    counter_transfer = (
+        2
+        * driving
+        * inert
+        * x
+        / (inert + total + np.sqrt((inert + total) ** 2 - 2 * driving * inert * x))
+    )
+    removed, received = {
+        "co-current": (co_transfer, co_transfer),
+        "counter-current": (counter_transfer, total - counter_transfer),
+    }[direction]
+    flows = np.array(
+        [
+            [
+                [p[side]["species_flow_kmol_s"][name] for name in ("A", "B", "I")]
+                for side in ("retentate", "sweep")
+            ]
+            for p in result["profiles"]
+        ]
+    )
+    temperatures = np.array(
+        [
+            [p[side]["temperature_K"] for side in ("retentate", "sweep")]
+            for p in result["profiles"]
+        ]
+    )
+    transfer = np.array([p["membrane_transfer_kmol_s_m"] for p in result["profiles"]])
+    expected = np.zeros((len(x), 2, 3))
+    expected[:, 0, 0] = 1e-6 - removed
+    expected[:, 1, 0] = received
+    expected[:, 1, 2] = inert
+    assert flows.shape == expected.shape
+    assert flows == pytest.approx(expected, rel=2e-5, abs=2e-11)
+    assert temperatures.shape == (len(x), 2)
+    assert temperatures == pytest.approx(np.full((len(x), 2), 700.0), abs=4e-4)
+    assert transfer == pytest.approx(
+        driving * inert / (inert + received) / c["length_m"], rel=5e-6, abs=1e-13
+    )
 
 
 def test_surface_kinetics_analytic_coverage_and_conversion(analytic_mechanism):
@@ -635,6 +702,56 @@ def test_hot_reverse_permeation_uses_donor_enthalpy():
     ), (actual[..., -1], fine[..., -1])
 
 
+def test_membrane_donor_changes_with_axial_flux_direction():
+    """“j>0 用反应侧，j<0 用扫气侧。”
+
+    Reaction-generated hydrogen changes the sign of the partial-pressure
+    difference along the channel. Independent finite-volume profiles use
+    local donor enthalpy on each side of that crossing, with the same public
+    error limits and three-grid uncertainty check as the fixed-sign case.
+    """
+    c = configuration("co-current", 9)
+    c["sweep"].update(
+        temperature_K=780.0, pressure_Pa=4e5, mole_fractions={"H2": 0.04, "AR": 0.96}
+    )
+    c["membrane"]["permeance_kmol_m2_s_Pa"] = 2e-11
+    result = run(c)
+    names = ct.Solution(MECH, "gas").species_names
+    actual = np.array(
+        [
+            [
+                [p[side]["species_flow_kmol_s"][name] for name in names]
+                + [p[side]["temperature_K"]]
+                for side in ("retentate", "sweep")
+            ]
+            for p in result["profiles"]
+        ]
+    )
+    meshes = [solve_cells(c, cells) for cells in (16, 32, 64)]
+    coarse, medium, fine = [
+        finite_volume_samples(m, c["sample_positions_m"]) for m in meshes
+    ]
+    first, second = abs(medium - coarse), abs(fine - medium)
+    business = 2e-5 * abs(fine[..., :-1]) + 2e-11
+    k = names.index("H2")
+    independent_drive = 3e5 * fine[:, 0, k] / fine[:, 0, :-1].sum(axis=1) - 4e5 * fine[
+        :, 1, k
+    ] / fine[:, 1, :-1].sum(axis=1)
+    assert independent_drive[0] < 0 < independent_drive[-1]
+    assert result["profiles"][0]["membrane_transfer_kmol_s_m"] < 0
+    assert result["profiles"][-1]["membrane_transfer_kmol_s_m"] > 0
+    assert actual.shape == fine.shape == (9, 2, len(names) + 1)
+    assert np.all(second[..., :-1] <= 0.4 * first[..., :-1] + 1e-16)
+    assert np.all(second[..., :-1] <= 0.25 * business)
+    assert np.all(
+        abs(actual[..., :-1] - fine[..., :-1])
+        <= business + second[..., :-1] / 2 + 1e-16
+    )
+    assert np.all(second[..., -1] < 0.4 * first[..., -1] + 1e-7)
+    assert np.all(second[..., -1] < 0.003)
+    assert np.all(abs(actual[..., -1] - fine[..., -1]) <= 0.002 + second[..., -1] / 2)
+
+
 def test_default_mechanism_and_json_cli_are_consistent():
     """“命令行入口从标准输入读取 config 并输出结果 JSON。”
 
@@ -727,6 +844,21 @@ def test_default_mechanism_and_json_cli_are_consistent():
         pytest.param(
             ("sample_positions_m",), [0.0, 0.049], id="wrong-final-coordinate"
         ),
+        pytest.param(
+            ("sample_positions_m",),
+            [0.0, 0.025, 0.025, 0.05],
+            id="duplicate-interior-coordinate",
+        ),
+        pytest.param(
+            ("sample_positions_m",),
+            [0.0, 0.03, 0.02, 0.05],
+            id="reversed-interior-coordinates",
+        ),
+        pytest.param(
+            ("sample_positions_m",),
+            np.linspace(0.0, 0.05, 202).tolist(),
+            id="too-many-samples",
+        ),
     ],
 )
 def test_invalid_configuration_is_rejected(path, value):
@@ -743,6 +875,16 @@ def test_invalid_configuration_is_rejected(path, value):
     parent[path[-1]] = value
     with pytest.raises(ValueError):  # noqa: PT011
         candidate.simulate_module(c)
+
+
+def test_non_dictionary_configuration_is_rejected():
+    """“`config` 是字典，额外字段可以忽略。”
+
+    An empty list must raise the specified public input error rather than
+    leaking an attribute error or accepting a different input structure.
+    """
+    with pytest.raises(ValueError):  # noqa: PT011
+        candidate.simulate_module([])
 
 
 @pytest.mark.parametrize(
