@@ -21,18 +21,22 @@ _EXCEPTION_FAMILIES = (
 )
 _IS_SUBCLASS = issubclass
 _EXCEPTION_TYPE = type
+_ENUMERATE = enumerate
 
 
 def exception_response(exc):
     """Preserve Python exception inheritance across the JSON process boundary."""
     family = None
-    for name, base in _EXCEPTION_FAMILIES:
+    family_mask = 0
+    for index, (name, base) in _ENUMERATE(_EXCEPTION_FAMILIES):
         if _IS_SUBCLASS(_EXCEPTION_TYPE(exc), base):
-            family = name
-            break
+            family_mask |= 1 << index
+            if family is None:
+                family = name
     return {
         "ok": False,
         "exception": family,
+        "exception_mask": family_mask,
         "exception_type": _EXCEPTION_TYPE(exc).__name__,
         "message": str(exc)[:2000],
     }

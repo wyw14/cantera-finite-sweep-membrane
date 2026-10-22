@@ -71,9 +71,9 @@
     "test_reactor.py::test_loadable_unsupported_phase_rejected_then_valid_call_recovers[surface]"
   ],
   "test_files_sha256": {
-    "candidate_proxy.py": "0fa4659b456ef51e11f333e11a63265636b039a7a66f32c4cc07d4a286ae9275",
+    "candidate_proxy.py": "347ec640d68a183b961a56eae2913e671699c09238e7a03fec46a42fb6028b0b",
     "candidate_sandbox.py": "75ab2164351d619835da5147be0c49457e54a197c2c26d4c49505ddb2f310386",
-    "candidate_worker.py": "082526df8f4a4979470c704a9feb42d6698c24c8d02ac9b120108b5d3057f455",
+    "candidate_worker.py": "8ee90646e2f9bd65729d18e2cc2da8a3c549de5acb245944a36c610302e7f292",
     "data/ammonia-Ru-Ba-YSZ-CSM-2019.yaml": "48c16d6a62828108b7e733d157b267ce1f9da7bab3bf205b0e7ef38d9582b1aa",
     "grade.py": "fa119c6dae7f929870f96c8a312523bac15da8adfd2402059f2b6e770fffc1c2",
     "independent_fv.py": "d2da07d104a2727366f1cb2484c26e601ba51ad43f5a8f96095a538923d0df84",
