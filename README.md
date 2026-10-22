@@ -5,7 +5,7 @@ D.7 化学与材料。本仓库根目录就是一个 Harbor 题包，保留 inst
 
 ## 运行
 
-已使用 Harbor 0.24.0。需要 Linux/amd64 Docker、支持 Landlock ABI >= 3 的 Linux 内核和允许题包独立 Verifier 以 root 引导隔离进程的环境；候选计算以非特权身份运行。
+已使用 Harbor 0.24.0。需要 Linux/amd64 Docker，并允许题包独立 Verifier 以 root 引导隔离进程；候选计算以 uid 65534 运行，强制启用文件权限保护和 seccomp。支持 Landlock 的内核会额外启用它；不支持时须通过实际读写及网络隔离探测，任何保护未建立都在准备阶段明确失败。
 
 ```sh
 harbor run -p . -a oracle -n 1 -k 1 --job-name oracle-check
@@ -21,15 +21,23 @@ harbor run -p . -a claude-code --ak version=2.1.306 --install-only -n 1 -k 1 --j
 ## 评测记录与边界
 
 初次发布从已冻结的 v4-003/chemistry 制作副本，去除本机 Agent 预装与固定网段，补齐提交者元数据及 Git 文件模式。
-本次初审返修保持题面、应用初始源码、研究机理及参考解不变；补齐测试的题面对应说明并整理格式，测试执行语义、容差及 20 个参数化节点保持不变。
-验收改用 pytest 可执行入口，由监督器启动并通过显式插件记录完整收集及 setup/call/teardown 三阶段；精确节点清单、超时清理、隔离和异常归零检查保留。
-Dockerfile 显式采用 Linux/amd64，并在安装原生 wheels 前检查架构；基础镜像摘要及依赖版本未变。默认从 AWS ECR 的 Docker Official Images 副本拉取 Python 镜像，固定清单与原 Docker Hub 清单的 SHA256 完全相同，避免本次环境中 Docker Hub 匿名认证端点的连接超时。审核环境如需使用自己的镜像地址，可通过 PYTHON_BASE 构建参数指定同一摘要的副本。正确的手工构建上下文为 environment/：
+第二轮初审返修保持题面、应用初始源码、研究机理及参考解不变；整理整个测试目录的格式、辅助函数和测试说明，物理条件、数值门槛及 20 个参数化节点保持不变。
+test.sh 直接执行 pytest，timeout 限制总时间，tee 同时保留控制台和 pytest.log。grade.py 只做准备与结果核验，显式插件记录完整收集及 setup/call/teardown 三阶段；精确节点清单、超时清理、隔离和异常归零检查保留。
+Dockerfile 的 FROM 行使用字面量固定镜像和完整 SHA256，不通过变量间接引用；显式采用 Linux/amd64，并在安装原生 wheels 前检查架构。基础镜像摘要及依赖版本未变。AWS ECR 的 Docker Official Images 副本与原 Docker Hub 清单的 SHA256 完全相同。正确的手工构建上下文为 environment/：
 
 ```sh
 docker build --no-cache --progress=plain -t membrane-review environment/
 ```
 
 Harbor 官方命令会自动使用该上下文。审核方原始构建错误日志未提供，不能据此归因或宣称复现了同一故障；返修验证日志随交付单独提供。
+
+## 失败诊断
+
+test.sh 开始调用原子初始化，将 reward 重置为 0，也处理旧的只读常规文件；完整验收通过后才原子替换为 1。初始零分不代表 Oracle 的最终结论。
+请同时检查 `/logs/verifier/preflight.json`、`grading.json`、`pytest.log` 和 `outcomes.json`。准备、依赖安装、测试收集、候选断言、超时及清理失败会被分别记录；安装失败或内核隔离未建立不计作模型难度证据。
+
+## 历史评测
+
 旧冻结环境的官方 Oracle 为 20/20、NOP 为 0/20；NOP 每项在调用阶段失败，setup/teardown 正常。
 旧冻结环境的一次 DeepSeek 运行通过 14/20，reward=0，Agent 耗尽3600秒，Verifier完整完成。API返回模型别名 deepseek-flash，harness为Claude Code2.1.306，effort=max。
 这些是旧环境的真实历史结果，不冒称当前返修 commit 已重新调用过模型；初次发布环境的 Oracle/NOP 及保存产物重放、本次返修的验证记录均分别保存。

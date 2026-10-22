@@ -284,7 +284,7 @@ def test_surface_kinetics_analytic_coverage_and_conversion(analytic_mechanism):
             if rhs == 0
             else brentq(
                 # brentq consumes this callback before the next loop iteration.
-                lambda f: 8 * np.log(Fin / f) + (12 / 7) * q * (Fin - f) - rhs,  # noqa: B023
+                lambda f, rhs=rhs: 8 * np.log(Fin / f) + (12 / 7) * q * (Fin - f) - rhs,
                 Fin / 10,
                 Fin,
                 xtol=1e-18,
@@ -318,8 +318,8 @@ def test_real_mechanism_conservation_and_local_thermochemistry(direction):
         for label, g in [("retentate", gas), ("sweep", sw)]:
             state = p[label]
             F = np.array([state["species_flow_kmol_s"][s] for s in g.species_names])
-            # Keep the existing joint physical-state assertion unchanged.
-            assert min(F) >= -1e-14 and sum(F) > 0  # noqa: PT018
+            assert min(F) >= -1e-14
+            assert sum(F) > 0
             assert state["pressure_Pa"] == pytest.approx(
                 c[label]["pressure_Pa"], rel=1e-9
             )
@@ -471,7 +471,7 @@ def test_inlet_weight_scaling_and_repeated_call_independence():
         }
     b = run(changed)
     # run() already checks each profile count against the same requested grid.
-    for x, y in zip(a["profiles"], b["profiles"]):  # noqa: B905
+    for x, y in zip(a["profiles"], b["profiles"], strict=True):
         for side in ["retentate", "sweep"]:
             assert x[side]["temperature_K"] == pytest.approx(
                 y[side]["temperature_K"], abs=4e-4
@@ -538,7 +538,9 @@ def test_default_mechanism_and_json_cli_are_consistent():
     assert len(cli["profiles"]) == len(trusted["profiles"])
     for result in (implicit, cli):
         # Counts were checked above or by run() against the requested grid.
-        for actual, expected in zip(result["profiles"], trusted["profiles"]):  # noqa: B905
+        for actual, expected in zip(
+            result["profiles"], trusted["profiles"], strict=True
+        ):
             assert actual["z_m"] == expected["z_m"]
             for side in ("retentate", "sweep"):
                 assert actual[side]["temperature_K"] == pytest.approx(

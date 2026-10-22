@@ -1,8 +1,5 @@
-# Bundled native wheels target Linux/amd64, including on an arm64 build host.
-ARG TASK_PLATFORM=linux/amd64
-# Docker Official Images replica; manifest bytes match Docker Hub's digest.
-ARG PYTHON_BASE=public.ecr.aws/docker/library/python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f
-FROM --platform=${TASK_PLATFORM} ${PYTHON_BASE}
+# Fixed Docker Official Images replica; bundled native wheels require amd64.
+FROM --platform=linux/amd64 public.ecr.aws/docker/library/python:3.12-slim@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY requirements-lock.txt /app/requirements-lock.txt
