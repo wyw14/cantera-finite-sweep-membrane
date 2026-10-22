@@ -247,6 +247,8 @@ def test_isothermal_pure_species_membrane_exact_flux(
 def test_homogeneous_isomerization_analytic_decay(analytic_mechanism, product_weight):
     """“允许某些物种入口为零，不能据此禁止其通过反应生成或穿膜进入。”
 
+    “扫气侧在本模型中没有化学源项。”
+
     Equal-thermo first-order isomers give exponential A decay and an exact B
     gain. The zero-inlet-product case separately covers a legal domain edge.
     """
@@ -272,6 +274,92 @@ def test_homogeneous_isomerization_analytic_decay(analytic_mechanism, product_we
     assert actual.shape == (len(x), 2)
     assert actual[:, 0] == pytest.approx(expected_a, rel=5e-6)
     assert actual[:, 1] == pytest.approx(expected_b, rel=5e-6, abs=2e-11)
+    sweep = np.array(
+        [
+            [p["sweep"]["species_flow_kmol_s"][name] for name in ("A", "B", "I")]
+            for p in r["profiles"]
+        ]
+    )
+    assert sweep.shape == (len(x), 3)
+    assert sweep == pytest.approx(
+        np.tile([8e-7, 2e-7, 1e-6], (len(x), 1)), rel=5e-6, abs=2e-11
+    )
+
+
+def test_homogeneous_and_catalytic_sources_add_in_the_same_channel(analytic_mechanism):
+    """“两者分别作用于给定的有效容积和催化面积。”
+
+    Equal-thermo isomers keep total molar flow and temperature fixed. The
+    simultaneous first-order gas source and rational surface source give
+    dF/dx=-F*(g+c/(8+b*F)). Separation of variables gives an elementary
+    logarithmic integral, independently inverted at every requested point.
+    With dimensionless x=z/L, g is dimensionless, c has units 1/s and b
+    has units 1/kmol; the constant 8 denotes the (3+5)/s surface loss rate.
+    """
+    c = analytic_configuration(analytic_mechanism)
+    c["retentate_void_volume_m3"] = 2e-5
+    c["catalyst_area_m2"] = 0.08
+    result = run(c)
+    x = np.asarray(c["sample_positions_m"]) / c["length_m"]
+    initial_a, total = 4e-7, 1e-6
+    q = 200 * 1e5 / (ct.gas_constant * 700 * total)
+    gas_gain = (
+        0.4 * 1e5 * c["retentate_void_volume_m3"] / (ct.gas_constant * 700 * total)
+    )
+    catalyst_gain = c["catalyst_area_m2"] * 1e-6 * 5 * q
+    b = 12 * q / 7
+    denominator = 8 * gas_gain + catalyst_gain
+    expected_a = np.array(
+        [
+            brentq(
+                lambda f, position=position: (
+                    8 / denominator * np.log(initial_a / f)
+                    + catalyst_gain
+                    / (denominator * gas_gain)
+                    * np.log(
+                        (denominator + b * gas_gain * initial_a)
+                        / (denominator + b * gas_gain * f)
+                    )
+                    - position
+                ),
+                initial_a / 100,
+                initial_a,
+                xtol=1e-18,
+            )
+            for position in x
+        ]
+    )
+    expected_flow = np.column_stack(
+        (expected_a, 5e-7 - expected_a, np.full(len(x), 5e-7))
+    )
+    a = q * expected_a
+    vacancy = 1 / (1 + a / 8 * (1 + 5 / 7))
+    expected_coverage = np.column_stack(
+        (vacancy, a * vacancy / 8, 5 * a * vacancy / 56)
+    )
+    actual_flow = np.array(
+        [
+            [p["retentate"]["species_flow_kmol_s"][name] for name in ("A", "B", "I")]
+            for p in result["profiles"]
+        ]
+    )
+    actual_coverage = np.array(
+        [
+            [p["surface_coverages"][name] for name in ("S", "AS", "BS")]
+            for p in result["profiles"]
+        ]
+    )
+    temperatures = np.array(
+        [
+            [p[side]["temperature_K"] for side in ("retentate", "sweep")]
+            for p in result["profiles"]
+        ]
+    )
+    assert actual_flow.shape == (len(x), 3)
+    assert actual_flow == pytest.approx(expected_flow, rel=2e-5, abs=2e-11)
+    assert actual_coverage.shape == (len(x), 3)
+    assert actual_coverage == pytest.approx(expected_coverage, rel=3e-6, abs=1e-8)
+    assert temperatures == pytest.approx(np.full((len(x), 2), 700.0), abs=0.002)
 
 
 @pytest.mark.parametrize("direction", ["co-current", "counter-current"])
@@ -589,15 +677,15 @@ def test_independent_finite_volume_grid_convergence(direction):
     business = 2e-5 * abs(fine[..., :-1]) + 2e-11
     flow_limit = business + second[..., :-1] / 2 + 1e-16
     assert actual.shape == fine.shape == (5, 2, len(names) + 1)
-    assert np.all(
-        second[..., :-1] <= 0.4 * first[..., :-1] + 1e-16
-    ), "FV species mesh convergence"
-    assert np.all(
-        second[..., :-1] <= 0.25 * business
-    ), "FV uncertainty exceeds species accuracy budget"
-    assert np.all(
-        second[..., -1] < 0.4 * first[..., -1] + 1e-7
-    ), "FV temperature mesh convergence"
+    assert np.all(second[..., :-1] <= 0.4 * first[..., :-1] + 1e-16), (
+        "FV species mesh convergence"
+    )
+    assert np.all(second[..., :-1] <= 0.25 * business), (
+        "FV uncertainty exceeds species accuracy budget"
+    )
+    assert np.all(second[..., -1] < 0.4 * first[..., -1] + 1e-7), (
+        "FV temperature mesh convergence"
+    )
     assert np.all(second[..., -1] < 0.002)
     assert np.all(abs(actual[..., :-1] - fine[..., :-1]) <= flow_limit), (
         actual,
@@ -814,6 +902,8 @@ def test_default_mechanism_and_json_cli_are_consistent():
     "path,value",
     [
         pytest.param(("sweep", "molar_flow_kmol_s"), -1, id="negative-flow"),
+        pytest.param(("sweep", "molar_flow_kmol_s"), 0.0, id="zero-flow"),
+        pytest.param(("sweep", "temperature_K"), "650.0", id="string-temperature"),
         pytest.param(
             ("retentate", "mole_fractions", "not-species"), 0, id="unknown-species"
         ),
@@ -845,6 +935,9 @@ def test_default_mechanism_and_json_cli_are_consistent():
             ("sample_positions_m",), [0.0, 0.049], id="wrong-final-coordinate"
         ),
         pytest.param(
+            ("sample_positions_m",), [0.001, 0.05], id="wrong-first-coordinate"
+        ),
+        pytest.param(
             ("sample_positions_m",),
             [0.0, 0.025, 0.025, 0.05],
             id="duplicate-interior-coordinate",
@@ -863,6 +956,9 @@ def test_default_mechanism_and_json_cli_are_consistent():
 )
 def test_invalid_configuration_is_rejected(path, value):
     """“缺字段、非法数值、未知物种、不能加载的机理/相”
+
+    “三个有限正数”
+    “严格递增的列表/元组，首项 0、末项 L；2–201 个位置”
 
     Each original rejected-input case is registered explicitly. All execute
     the same ValueError assertion; no branch can silently omit the check.
@@ -1073,6 +1169,92 @@ species:
     )
     assert actual.shape == (2, 4)
     assert actual == pytest.approx(np.full((2, 4), 0.25), rel=3e-6, abs=1e-8)
+
+
+@pytest.mark.parametrize(
+    "explicit_initial", [False, True], ids=["loaded-default", "explicit-default"]
+)
+def test_surface_limit_preserves_reachable_class_masses(tmp_path, explicit_initial):
+    """“机理显式给定初始覆盖度时使用该值；未给定时使用相加载后的默认值。”
+
+    “允许最终部分覆盖度为零。”
+
+    S drains to absorbing AS and the closed BS/CS pair in a 1:3 ratio.
+    Within that pair detailed balance fixes BS:CS=1:2; inert DS retains its
+    initial mass. These absorption probabilities give the limiting vector
+    without consulting the candidate or integrating its surface equations.
+    """
+    header = """units: {length: m, quantity: kmol, time: s, activation-energy: J/kmol}
+phases:
+- name: gas
+  thermo: ideal-gas
+  kinetics: gas
+  elements: [Ar]
+  species: [I]
+  reactions: none
+- name: catalyst
+  thermo: ideal-surface
+  adjacent-phases: [gas]
+  elements: [Pt]
+  species: [S, AS, BS, CS, DS]
+  kinetics: surface
+  reactions: [surface-reactions]
+  site-density: 1e-6
+"""
+    if explicit_initial:
+        header += (
+            "  state: {T: 700, P: 100000, coverages: {S: 0.6, AS: 0.1, DS: 0.3}}\n"
+        )
+    header += """species:
+- name: I
+  composition: {Ar: 1}
+  thermo: {model: constant-cp, T0: 300, h0: 0, s0: 0, cp0: 20000}
+"""
+    states = "".join(
+        "- name: "
+        + name
+        + "\n  composition: {Pt: 1}\n"
+        + "  thermo: {model: constant-cp, h0: 0, cp0: 0, s0: "
+        + str(ct.gas_constant * np.log(2) if name == "CS" else 0)
+        + "}\n"
+        for name in ("S", "AS", "BS", "CS", "DS")
+    )
+    reactions = """surface-reactions:
+- equation: S => AS
+  rate-constant: {A: 1, b: 0, Ea: 0}
+- equation: S => BS
+  rate-constant: {A: 3, b: 0, Ea: 0}
+- equation: BS <=> CS
+  rate-constant: {A: 2, b: 0, Ea: 0}
+"""
+    path = tmp_path / "reachable-classes.yaml"
+    path.write_text(header + states + reactions)
+    gas = ct.Solution(str(path), "gas")
+    surface = ct.Interface(str(path), "catalyst", adjacent=[gas])
+    initial = [0.6, 0.1, 0.0, 0.0, 0.3] if explicit_initial else [1, 0, 0, 0, 0]
+    assert surface.coverages == pytest.approx(initial, abs=1e-14)
+    surface.TP = 700, 1e5
+    assert surface.forward_rate_constants[2] / surface.reverse_rate_constants[
+        2
+    ] == pytest.approx(2.0, rel=1e-12)
+    c = analytic_configuration(str(path), points=2)
+    for side in ("retentate", "sweep"):
+        c[side]["mole_fractions"] = {"I": 1.0}
+    c["membrane"]["species"] = "I"
+    result = run(c)
+    expected = (
+        [0, 0.25, 0.15, 0.3, 0.3] if explicit_initial else [0, 0.25, 0.25, 0.5, 0]
+    )
+    actual = np.array(
+        [
+            [p["surface_coverages"][name] for name in ("S", "AS", "BS", "CS", "DS")]
+            for p in result["profiles"]
+        ]
+    )
+    assert actual.shape == (2, 5)
+    assert actual == pytest.approx(np.tile(expected, (2, 1)), rel=3e-6, abs=1e-8)
+    assert np.all(actual >= 0)
+    assert actual.sum(axis=1) == pytest.approx([1, 1], abs=1e-8)
 
 
 @pytest.mark.parametrize("phase", ["gas", "surface"])
