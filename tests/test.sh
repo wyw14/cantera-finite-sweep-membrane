@@ -45,7 +45,7 @@ stop_active_stage() {
 reset_reward() {
     # This path deliberately does not depend on Python or successful imports.
     # No candidate runs before these root-owned directories are protected.
-    local temporary unsafe=0
+    local temporary alternate=/logs/verifier/reward.json unsafe=0
     if [[ "$EUID" != 0 || -L /logs || -L /logs/verifier ]]; then
         printf '%s\n' 'Unsafe verifier output path or non-root bootstrap' >&2
         return 1
@@ -76,6 +76,22 @@ reset_reward() {
     if ! mv -fT -- "$temporary" "$reward"; then
         rm -f -- "$temporary"
         return 1
+    fi
+    # Harbor prefers JSON if both formats exist. This task publishes text only.
+    if [[ -L "$alternate" ]]; then
+        rm -- "$alternate" || return 1
+        unsafe=1
+    elif [[ -e "$alternate" && ! -f "$alternate" ]]; then
+        printf '%s\n' 'Alternate reward must be a regular file' >&2
+        return 1
+    elif [[ -f "$alternate" ]]; then
+        if [[ "$(stat -c %h -- "$alternate")" != 1 ]]; then
+            rm -- "$alternate" || return 1
+            unsafe=1
+        else
+            chmod 0600 "$alternate" || return 1
+            rm -- "$alternate" || return 1
+        fi
     fi
     if [[ "$unsafe" != 0 ]]; then
         printf '%s\n' 'Unsafe reward entry replaced with zero; rejecting this run' >&2

@@ -248,7 +248,7 @@ def simulate_module(config):
         # Uniformly slower kinetics have the same attracting steady state but
         # require a proportionally longer relaxation time. An absolute small
         # rate alone therefore cannot certify that the coverages have settled.
-        duration = min(1.0, 1.0 / initial_rate) if initial_rate > 0 else 1.0
+        duration = 1.0 / initial_rate if initial_rate > 0 else 1.0
         for _ in range(32):
             surf.advance_coverages(duration, rtol=1e-10, atol=1e-16)
             current = surf.coverages.copy()

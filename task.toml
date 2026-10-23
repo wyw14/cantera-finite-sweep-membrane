@@ -8,7 +8,7 @@ authors = [{name = "wyw14"}]
 keywords = ["cantera", "surface-kinetics", "membrane", "counter-current", "enthalpy"]
 
 [agent]
-timeout_sec = 3600
+timeout_sec = 10800
 
 [environment]
 build_timeout_sec = 900
@@ -16,7 +16,7 @@ cpus = 1
 memory_mb = 2048
 storage_mb = 4096
 gpus = 0
-allow_internet = true
+network_mode = "public"
 
 [verifier]
 environment_mode = "separate"

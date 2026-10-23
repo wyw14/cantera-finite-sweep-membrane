@@ -499,6 +499,73 @@ def test_surface_steady_branch_invariant_to_kinetic_time_scale(
     assert actual == pytest.approx(expected, rel=3e-6, abs=1e-8)
 
 
+@pytest.mark.parametrize(
+    "forward_rate,reverse_rate,expected_s",
+    [(1e-30, 1e-30, 0.5), (1e-30, 9e-30, 0.75)],
+    ids=["symmetric", "asymmetric"],
+)
+def test_nonlinear_surface_limit_respects_the_physical_relaxation_clock(
+    tmp_path, forward_rate, reverse_rate, expected_s
+):
+    """“按该机理的有限速率动力学充分松弛后的极限定义覆盖度。”
+
+    For 2 S -> 2 X and its reverse, the attracting limit obeys
+    k_forward*S**2=k_reverse*X**2 and S+X=1. The analytic limit is
+    independent of a common positive kinetic time scale.
+    """
+    mechanism = tmp_path / "nonlinear-surface.yaml"
+    mechanism.write_text(
+        """units: {length: m, quantity: kmol, time: s, activation-energy: J/kmol}
+phases:
+- name: gas
+  thermo: ideal-gas
+  kinetics: gas
+  elements: [Ar]
+  species: [I]
+  reactions: none
+- name: catalyst
+  thermo: ideal-surface
+  adjacent-phases: [gas]
+  elements: [Pt]
+  species: [S, X]
+  kinetics: surface
+  reactions: [surface-reactions]
+  site-density: 1.0e-6
+  state: {T: 700, coverages: {S: 1.0, X: 0.0}}
+species:
+- name: I
+  composition: {Ar: 1}
+  thermo: {model: constant-cp, T0: 300, h0: 0, s0: 0, cp0: 20000}
+- name: S
+  composition: {Pt: 1}
+  thermo: {model: constant-cp}
+- name: X
+  composition: {Pt: 1}
+  thermo: {model: constant-cp}
+surface-reactions:
+- equation: 2 S => 2 X
+  rate-constant: {A: FORWARD, b: 0, Ea: 0}
+- equation: 2 X => 2 S
+  rate-constant: {A: REVERSE, b: 0, Ea: 0}
+""".replace("FORWARD", repr(forward_rate)).replace("REVERSE", repr(reverse_rate))
+    )
+    config = analytic_configuration(str(mechanism), points=2)
+    for side in ("retentate", "sweep"):
+        config[side]["mole_fractions"] = {"I": 1.0}
+    config["membrane"]["species"] = "I"
+    result = run(config)
+    coverage = np.array(
+        [[point["surface_coverages"][name] for name in ("S", "X")]
+         for point in result["profiles"]]
+    )
+    expected = np.tile([expected_s, 1 - expected_s], (2, 1))
+    assert coverage == pytest.approx(expected, rel=3e-6, abs=1e-8)
+    for point in result["profiles"]:
+        assert point["retentate"]["temperature_K"] == pytest.approx(700.0, abs=4e-4)
+        assert point["retentate"]["species_flow_kmol_s"]["I"] == pytest.approx(1e-6, rel=5e-6)
+        assert point["sweep"]["species_flow_kmol_s"]["I"] == pytest.approx(2e-6, rel=5e-6)
+
+
 @pytest.mark.parametrize("direction", ["co-current", "counter-current"])
 def test_real_mechanism_conservation_and_local_thermochemistry(direction):
     """“每侧焓流应与返回的物种流量和温度自洽”
