@@ -9,6 +9,14 @@ RUN python -c "import platform; assert platform.machine() == 'x86_64', 'This tas
     cd /opt/wheels && sha256sum -c SHA256SUMS && \
     python -m pip install --no-index --no-deps --find-links /opt/wheels -r /app/requirements-lock.txt && \
     python -m pip check
+# Build a separate dependency-only filesystem once. No tests, solutions or
+# agent artifacts enter it. Hardlinks avoid copying large libraries per worker.
+RUN mkdir -p /opt/candidate-root/etc /opt/candidate-root/tmp \
+        /opt/candidate-root/dev /opt/candidate-root/app \
+    && cp -al /usr /opt/candidate-root/usr \
+    && cp -a /bin /lib /lib64 /opt/candidate-root/ \
+    && cp /etc/ld.so.cache /opt/candidate-root/etc/ld.so.cache \
+    && chmod 0755 /opt/candidate-root /opt/candidate-root/tmp
 COPY src/ /app/src/
 COPY upstream/ /app/src/upstream/
 ENV PYTHONPATH=/app/src

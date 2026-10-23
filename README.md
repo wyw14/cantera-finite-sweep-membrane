@@ -5,7 +5,7 @@ D.7 化学与材料。本仓库根目录就是一个 Harbor 题包，保留 inst
 
 ## 运行
 
-已使用 Harbor 0.24.0。需要 Linux/amd64 Docker，并允许题包独立 Verifier 以 root 引导隔离进程；候选计算以 uid 65534 运行，强制启用文件权限保护和 seccomp。支持 Landlock 的内核会额外启用它；不支持时须通过实际读写及网络隔离探测，任何保护未建立都在准备阶段明确失败。
+已使用 Harbor 0.24.0。需要 Linux/amd64 Docker，并允许题包独立 Verifier 以 root 引导隔离进程；候选计算以非特权身份运行，强制启用文件隔离和 seccomp。Landlock 不可用时使用独立文件系统及工作进程身份；两条路径都须通过实际读写及网络隔离探测，任何保护未建立都在准备阶段明确失败。
 
 ```sh
 harbor run -p . -a oracle -n 1 -k 1 --job-name oracle-check
@@ -51,3 +51,21 @@ test.sh 在调用 Python 前由受信 shell 原子重置 reward 为 0，也处�
 
 Cantera 3.2.0，https://github.com/Cantera/cantera/tree/v3.2.0 。原示例及许可保留在 environment/upstream；研究机理的作者归属见 ATTRIBUTION.md 和机理头部，不将第三方研究机理统一重新许可。
 第三方 wheel 保留各自内置许可及原始字节。许可证、研究署名和第三方归属不因本次题目包装而改变。
+
+## Verifier host compatibility
+
+The task requires Linux/amd64 and a root bootstrap for its separate verifier.
+Candidate computations run without root privileges, with mandatory seccomp and
+no-new-privileges. When usable, Landlock provides the filesystem allowlist.
+Otherwise the verifier enters a dependency-only chroot, with a distinct UID and
+private scratch directory for each worker. The candidate can read its public
+source and inputs; tests, reference solutions and scoring files stay outside
+the candidate filesystem. Public input files added during an RPC session remain
+available without restarting the computation. Neither path grants network access.
+
+The fallback uses the standard Docker capabilities for chroot, device creation
+and dropping identity (SYS_CHROOT, MKNOD, SETUID, SETGID). It does not require a
+privileged container. The verifier checks actual read/write/socket access before
+running tests and fails closed with diagnostics if isolation cannot be established.
+Read-only tests/solution mounts are supported. Inspect verifier/preflight.json,
+grading.json and pytest.log to distinguish environment failures from test failures.
