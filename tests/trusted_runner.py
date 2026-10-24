@@ -1,6 +1,7 @@
 """Record trusted pytest CLI results; candidate code executes only through RPC."""
 
 import json
+import sys
 from pathlib import Path
 
 
@@ -54,6 +55,7 @@ class Ledger:
                     "outcomes": self.outcomes,
                     "collection_errors": self.collection_errors,
                     "exitstatus": int(exitstatus),
+                    "execution_errors": list(sys.modules["candidate_proxy"].EXECUTION_ERRORS),
                     "failures": self.failures,
                     "warnings": self.warnings,
                 },

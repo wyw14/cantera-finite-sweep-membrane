@@ -19,6 +19,17 @@ HERE = Path(__file__).resolve().parent
 PROCESSES = []
 
 
+EXECUTION_ERRORS = []
+
+
+def execution_error(message, exception_type=RuntimeError, cleanup=None):
+    """Record a trusted transport fault before raising it to the current test."""
+    EXECUTION_ERRORS.append({"kind": exception_type.__name__, "message": message})
+    if cleanup is not None:
+        cleanup()
+    return exception_type(message)
+
+
 class RemoteCandidateError(Exception):
     """A candidate exception outside the declared built-in exception families."""
 
@@ -50,7 +61,7 @@ def exception_from_response(answer):
     """Reject malformed family masks without importing candidate exception types."""
     mask = answer.get("exception_mask")
     if type(mask) is not int or mask not in _EXCEPTION_TYPES:
-        return RemoteCandidateError("Invalid candidate exception family mask")
+        return execution_error("Invalid candidate exception family mask")
     return _EXCEPTION_TYPES[mask](answer.get("message", "Candidate exception"))
 
 
@@ -126,8 +137,7 @@ class Candidate:
         while b"\n" not in self.pending:
             wait = deadline - time.monotonic()
             if wait <= 0 or not select.select([self.process.stdout], [], [], wait)[0]:
-                self.close()
-                raise TimeoutError("Candidate deadline exceeded")
+                raise execution_error("Candidate deadline exceeded", TimeoutError, self.close)
             block = os.read(self.process.stdout.fileno(), 65536)
             if not block:
                 error_tail = ""
@@ -136,23 +146,20 @@ class Candidate:
                     with error_path.open("rb") as error_log:
                         error_log.seek(max(0, error_path.stat().st_size - 3000))
                         error_tail = error_log.read().decode("utf-8", errors="replace")
-                self.close()
-                raise RuntimeError(
-                    "Candidate exited without a complete RPC result: " + error_tail
+                raise execution_error(
+                    "Candidate exited without a complete RPC result: " + error_tail,
+                    cleanup=self.close,
                 )
             self.pending += block
             if len(self.pending) > MAX_WIRE:
-                self.close()
-                raise RuntimeError("Candidate output exceeds RPC limit")
+                raise execution_error("Candidate output exceeds RPC limit", cleanup=self.close)
         line, self.pending = self.pending.split(b"\n", 1)
         try:
             value = json.loads(line)
         except (ValueError, UnicodeError) as exc:
-            self.close()
-            raise RuntimeError("Invalid candidate protocol") from exc
+            raise execution_error("Invalid candidate protocol", cleanup=self.close) from exc
         if not isinstance(value, dict):
-            self.close()
-            raise RuntimeError("Invalid candidate protocol")
+            raise execution_error("Invalid candidate protocol", cleanup=self.close)
         return value
 
     def _start(self, deadline):
@@ -174,8 +181,7 @@ class Candidate:
         self._track(self.process)
         ready = self._read(deadline)
         if ready.get("ready") is not True or type(ready.get("landlock_abi")) is not int:
-            self.close()
-            raise RuntimeError("Candidate sandbox did not initialize")
+            raise execution_error("Candidate sandbox did not initialize", cleanup=self.close)
         self.abi = ready["landlock_abi"]
         self.sandbox_policy = ready.get("sandbox_policy")
 
@@ -217,9 +223,8 @@ class Candidate:
             )
             self.process.stdin.flush()
         except (BrokenPipeError, OSError) as exc:
-            self.close()
-            raise RuntimeError(
-                "Candidate exited before accepting an RPC request"
+            raise execution_error(
+                "Candidate exited before accepting an RPC request", cleanup=self.close
             ) from exc
         answer = self._read(deadline)
 
@@ -235,7 +240,7 @@ class Candidate:
         if answer.get("ok") is False:
             raise exception_from_response(answer)
         if answer.get("ok") is not True:
-            raise RuntimeError("Invalid candidate response")
+            raise execution_error("Invalid candidate response")
         return unpack(answer["value"])
 
     def __getattr__(self, name):
@@ -291,19 +296,22 @@ def run_cli(input, timeout=20):
         try:
             process.communicate(input.encode("utf-8"), timeout=timeout)
         except subprocess.TimeoutExpired as exc:
+            deadline_error = execution_error("Candidate CLI deadline exceeded", TimeoutError)
             os.killpg(process.pid, signal.SIGKILL)
             try:
                 process.wait(timeout=3)
             except subprocess.TimeoutExpired as cleanup_error:
-                raise RuntimeError(
+                raise execution_error(
                     "Candidate CLI did not terminate after SIGKILL"
                 ) from cleanup_error
-            raise TimeoutError("Candidate CLI deadline exceeded") from exc
+            raise deadline_error from exc
+        if process.returncode < 0:
+            raise execution_error("Candidate CLI terminated by signal " + str(-process.returncode))
         out.seek(0)
         err.seek(0)
         stdout, stderr = out.read(MAX_WIRE + 1), err.read(MAX_WIRE + 1)
         if len(stdout) > MAX_WIRE or len(stderr) > MAX_WIRE:
-            raise RuntimeError("Candidate CLI output exceeds limit")
+            raise execution_error("Candidate CLI output exceeds limit")
         return SimpleNamespace(
             returncode=process.returncode,
             stdout=stdout.decode("utf-8"),

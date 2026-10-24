@@ -1,0 +1,441 @@
+{
+  "schema_version": 1,
+  "weight_policy": {
+    "aggregation": "Sum the positive weights of passing scientific tests after complete, trusted execution. Equivalent parameter cases divide a fixed behavior budget.",
+    "basis": "Coupled physical behavior and state evolution carry the main contribution; input rejection and interface compatibility have smaller, separate budgets. Adding parameter cases does not increase a behavior's total budget.",
+    "hard_gates": [
+      "Exact complete collection and setup/call/teardown evidence",
+      "Matching JUnit, ledger, exit status and trusted source hashes",
+      "No candidate transport crash, local deadline, malformed protocol, verifier timeout or cleanup failure"
+    ]
+  },
+  "gate_tests": [],
+  "tests": {
+    "test_reactor.py::test_constant_cp_heat_exchanger_closed_form[co-current]": {
+      "weight": 0.035,
+      "priority": "core",
+      "group": "heat",
+      "rationale": "Impose the correct co-current and counter-current thermal boundary conditions. Parameter case: co-current."
+    },
+    "test_reactor.py::test_constant_cp_heat_exchanger_closed_form[counter-current]": {
+      "weight": 0.035,
+      "priority": "core",
+      "group": "heat",
+      "rationale": "Impose the correct co-current and counter-current thermal boundary conditions. Parameter case: counter-current."
+    },
+    "test_reactor.py::test_isothermal_pure_species_membrane_exact_flux[original-species-False-co-current]": {
+      "weight": 0.01,
+      "priority": "core",
+      "group": "membrane",
+      "rationale": "Compute signed finite-sweep permeation under both flow directions and native species orderings. Parameter case: original-species-False-co-current."
+    },
+    "test_reactor.py::test_isothermal_pure_species_membrane_exact_flux[original-species-False-counter-current]": {
+      "weight": 0.01,
+      "priority": "core",
+      "group": "membrane",
+      "rationale": "Compute signed finite-sweep permeation under both flow directions and native species orderings. Parameter case: original-species-False-counter-current."
+    },
+    "test_reactor.py::test_isothermal_pure_species_membrane_exact_flux[original-species-True-co-current]": {
+      "weight": 0.01,
+      "priority": "core",
+      "group": "membrane",
+      "rationale": "Compute signed finite-sweep permeation under both flow directions and native species orderings. Parameter case: original-species-True-co-current."
+    },
+    "test_reactor.py::test_isothermal_pure_species_membrane_exact_flux[original-species-True-counter-current]": {
+      "weight": 0.01,
+      "priority": "core",
+      "group": "membrane",
+      "rationale": "Compute signed finite-sweep permeation under both flow directions and native species orderings. Parameter case: original-species-True-counter-current."
+    },
+    "test_reactor.py::test_isothermal_pure_species_membrane_exact_flux[permuted-species-False-co-current]": {
+      "weight": 0.01,
+      "priority": "core",
+      "group": "membrane",
+      "rationale": "Compute signed finite-sweep permeation under both flow directions and native species orderings. Parameter case: permuted-species-False-co-current."
+    },
+    "test_reactor.py::test_isothermal_pure_species_membrane_exact_flux[permuted-species-False-counter-current]": {
+      "weight": 0.01,
+      "priority": "core",
+      "group": "membrane",
+      "rationale": "Compute signed finite-sweep permeation under both flow directions and native species orderings. Parameter case: permuted-species-False-counter-current."
+    },
+    "test_reactor.py::test_isothermal_pure_species_membrane_exact_flux[permuted-species-True-co-current]": {
+      "weight": 0.01,
+      "priority": "core",
+      "group": "membrane",
+      "rationale": "Compute signed finite-sweep permeation under both flow directions and native species orderings. Parameter case: permuted-species-True-co-current."
+    },
+    "test_reactor.py::test_isothermal_pure_species_membrane_exact_flux[permuted-species-True-counter-current]": {
+      "weight": 0.01,
+      "priority": "core",
+      "group": "membrane",
+      "rationale": "Compute signed finite-sweep permeation under both flow directions and native species orderings. Parameter case: permuted-species-True-counter-current."
+    },
+    "test_reactor.py::test_homogeneous_isomerization_analytic_decay[present-product]": {
+      "weight": 0.025,
+      "priority": "core",
+      "group": "kinetics",
+      "rationale": "Integrate finite-rate homogeneous conversion, including initially absent product. Parameter case: present-product."
+    },
+    "test_reactor.py::test_homogeneous_isomerization_analytic_decay[zero-inlet-product]": {
+      "weight": 0.025,
+      "priority": "core",
+      "group": "kinetics",
+      "rationale": "Integrate finite-rate homogeneous conversion, including initially absent product. Parameter case: zero-inlet-product."
+    },
+    "test_reactor.py::test_homogeneous_and_catalytic_sources_add_in_the_same_channel": {
+      "weight": 0.05,
+      "priority": "core",
+      "group": "kinetics",
+      "rationale": "Combine gas-volume and catalyst-area source terms without dropping either reaction contribution."
+    },
+    "test_reactor.py::test_membrane_enters_species_absent_from_receiver[co-current]": {
+      "weight": 0.02,
+      "priority": "core",
+      "group": "membrane",
+      "rationale": "Admit physically generated receiver species that have zero inlet flow. Parameter case: co-current."
+    },
+    "test_reactor.py::test_membrane_enters_species_absent_from_receiver[counter-current]": {
+      "weight": 0.02,
+      "priority": "core",
+      "group": "membrane",
+      "rationale": "Admit physically generated receiver species that have zero inlet flow. Parameter case: counter-current."
+    },
+    "test_reactor.py::test_surface_kinetics_analytic_coverage_and_conversion": {
+      "weight": 0.05,
+      "priority": "core",
+      "group": "surface",
+      "rationale": "Use physical surface coverage and site scaling to compute catalytic conversion."
+    },
+    "test_reactor.py::test_surface_steady_branch_invariant_to_kinetic_time_scale[slow]": {
+      "weight": 0.02,
+      "priority": "core",
+      "group": "surface",
+      "rationale": "Reach the specified attracting surface state independently of absolute kinetic rate scale. Parameter case: slow."
+    },
+    "test_reactor.py::test_surface_steady_branch_invariant_to_kinetic_time_scale[very-slow]": {
+      "weight": 0.02,
+      "priority": "core",
+      "group": "surface",
+      "rationale": "Reach the specified attracting surface state independently of absolute kinetic rate scale. Parameter case: very-slow."
+    },
+    "test_reactor.py::test_nonlinear_surface_limit_respects_the_physical_relaxation_clock[symmetric]": {
+      "weight": 0.02,
+      "priority": "core",
+      "group": "surface",
+      "rationale": "Select the nonlinear attracting coverage branch from the mechanism's initial condition. Parameter case: symmetric."
+    },
+    "test_reactor.py::test_nonlinear_surface_limit_respects_the_physical_relaxation_clock[asymmetric]": {
+      "weight": 0.02,
+      "priority": "core",
+      "group": "surface",
+      "rationale": "Select the nonlinear attracting coverage branch from the mechanism's initial condition. Parameter case: asymmetric."
+    },
+    "test_reactor.py::test_real_mechanism_conservation_and_local_thermochemistry[co-current]": {
+      "weight": 0.05,
+      "priority": "core",
+      "group": "coupled",
+      "rationale": "Satisfy elemental and energy balances, local thermochemistry and both inlet conditions with the native mechanism. Parameter case: co-current."
+    },
+    "test_reactor.py::test_real_mechanism_conservation_and_local_thermochemistry[counter-current]": {
+      "weight": 0.05,
+      "priority": "core",
+      "group": "coupled",
+      "rationale": "Satisfy elemental and energy balances, local thermochemistry and both inlet conditions with the native mechanism. Parameter case: counter-current."
+    },
+    "test_reactor.py::test_independent_finite_volume_grid_convergence[co-current]": {
+      "weight": 0.06,
+      "priority": "core",
+      "group": "coupled",
+      "rationale": "Reproduce the fully coupled two-channel boundary-value solution against an independent converged discretization. Parameter case: co-current."
+    },
+    "test_reactor.py::test_independent_finite_volume_grid_convergence[counter-current]": {
+      "weight": 0.06,
+      "priority": "core",
+      "group": "coupled",
+      "rationale": "Reproduce the fully coupled two-channel boundary-value solution against an independent converged discretization. Parameter case: counter-current."
+    },
+    "test_reactor.py::test_inlet_weight_scaling_and_repeated_call_independence": {
+      "weight": 0.025,
+      "priority": "supporting",
+      "group": "interface",
+      "rationale": "Normalize inlet composition weights and avoid state contamination across different requests."
+    },
+    "test_reactor.py::test_hot_reverse_permeation_uses_donor_enthalpy": {
+      "weight": 0.04,
+      "priority": "core",
+      "group": "heat",
+      "rationale": "Carry enthalpy from the actual hot donor during reverse membrane transfer."
+    },
+    "test_reactor.py::test_membrane_donor_changes_with_axial_flux_direction": {
+      "weight": 0.05,
+      "priority": "core",
+      "group": "heat",
+      "rationale": "Switch the enthalpy donor where the local membrane flux changes sign along the reactor."
+    },
+    "test_reactor.py::test_default_mechanism_and_json_cli_are_consistent": {
+      "weight": 0.02,
+      "priority": "supporting",
+      "group": "interface",
+      "rationale": "Load the declared default mechanism and deliver the same physical result through JSON CLI."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[negative-flow]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: negative-flow."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[zero-flow]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: zero-flow."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[string-temperature]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: string-temperature."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[unknown-species]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: unknown-species."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[bad-direction]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: bad-direction."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[bad-grid]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: bad-grid."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[bool-pressure]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: bool-pressure."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[nan-temperature]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: nan-temperature."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[infinite-area]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: infinite-area."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[negative-weight]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: negative-weight."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[zero-total-weight]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: zero-total-weight."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[unknown-membrane-species]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: unknown-membrane-species."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[unloadable-mechanism]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: unloadable-mechanism."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[unknown-gas-phase]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: unknown-gas-phase."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[unknown-surface-phase]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: unknown-surface-phase."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[too-few-samples]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: too-few-samples."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[wrong-final-coordinate]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: wrong-final-coordinate."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[wrong-first-coordinate]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: wrong-first-coordinate."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[duplicate-interior-coordinate]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: duplicate-interior-coordinate."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[reversed-interior-coordinates]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: reversed-interior-coordinates."
+    },
+    "test_reactor.py::test_invalid_configuration_is_rejected[too-many-samples]": {
+      "weight": 0.002380952380952381,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject each specified invalid inlet, membrane, geometry or sampling condition. Parameter case: too-many-samples."
+    },
+    "test_reactor.py::test_non_dictionary_configuration_is_rejected": {
+      "weight": 0.005,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject a top-level input that cannot represent the configuration contract."
+    },
+    "test_reactor.py::test_missing_required_field_rejected_before_clean_recovery[length_m]": {
+      "weight": 0.002777777777777778,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject a missing required physical field and recover for the next valid request. Parameter case: length_m."
+    },
+    "test_reactor.py::test_missing_required_field_rejected_before_clean_recovery[catalyst_area_m2]": {
+      "weight": 0.002777777777777778,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject a missing required physical field and recover for the next valid request. Parameter case: catalyst_area_m2."
+    },
+    "test_reactor.py::test_missing_required_field_rejected_before_clean_recovery[retentate_void_volume_m3]": {
+      "weight": 0.002777777777777778,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject a missing required physical field and recover for the next valid request. Parameter case: retentate_void_volume_m3."
+    },
+    "test_reactor.py::test_missing_required_field_rejected_before_clean_recovery[flow_direction]": {
+      "weight": 0.002777777777777778,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject a missing required physical field and recover for the next valid request. Parameter case: flow_direction."
+    },
+    "test_reactor.py::test_missing_required_field_rejected_before_clean_recovery[sample_positions_m]": {
+      "weight": 0.002777777777777778,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject a missing required physical field and recover for the next valid request. Parameter case: sample_positions_m."
+    },
+    "test_reactor.py::test_missing_required_field_rejected_before_clean_recovery[retentate]": {
+      "weight": 0.002777777777777778,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject a missing required physical field and recover for the next valid request. Parameter case: retentate."
+    },
+    "test_reactor.py::test_missing_required_field_rejected_before_clean_recovery[sweep]": {
+      "weight": 0.002777777777777778,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject a missing required physical field and recover for the next valid request. Parameter case: sweep."
+    },
+    "test_reactor.py::test_missing_required_field_rejected_before_clean_recovery[membrane]": {
+      "weight": 0.002777777777777778,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject a missing required physical field and recover for the next valid request. Parameter case: membrane."
+    },
+    "test_reactor.py::test_missing_required_field_rejected_before_clean_recovery[heat]": {
+      "weight": 0.002777777777777778,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject a missing required physical field and recover for the next valid request. Parameter case: heat."
+    },
+    "test_reactor.py::test_output_schema_and_valid_tuple_coordinate_boundaries[2]": {
+      "weight": 0.01,
+      "priority": "supporting",
+      "group": "interface",
+      "rationale": "Honor the output schema and both supported sampling-count endpoints. Parameter case: 2."
+    },
+    "test_reactor.py::test_output_schema_and_valid_tuple_coordinate_boundaries[201]": {
+      "weight": 0.01,
+      "priority": "supporting",
+      "group": "interface",
+      "rationale": "Honor the output schema and both supported sampling-count endpoints. Parameter case: 201."
+    },
+    "test_reactor.py::test_surface_weak_link_reaches_unique_attracting_distribution[eight-decade-separation]": {
+      "weight": 0.02,
+      "priority": "core",
+      "group": "surface",
+      "rationale": "Reach the unique attracting distribution when surface transitions span separated time scales. Parameter case: eight-decade-separation."
+    },
+    "test_reactor.py::test_surface_weak_link_reaches_unique_attracting_distribution[twenty-decade-separation]": {
+      "weight": 0.02,
+      "priority": "core",
+      "group": "surface",
+      "rationale": "Reach the unique attracting distribution when surface transitions span separated time scales. Parameter case: twenty-decade-separation."
+    },
+    "test_reactor.py::test_surface_limit_preserves_reachable_class_masses[loaded-default]": {
+      "weight": 0.02,
+      "priority": "core",
+      "group": "surface",
+      "rationale": "Preserve mechanism-defined reachable-class masses from implicit and explicit initial coverage. Parameter case: loaded-default."
+    },
+    "test_reactor.py::test_surface_limit_preserves_reachable_class_masses[explicit-default]": {
+      "weight": 0.02,
+      "priority": "core",
+      "group": "surface",
+      "rationale": "Preserve mechanism-defined reachable-class masses from implicit and explicit initial coverage. Parameter case: explicit-default."
+    },
+    "test_reactor.py::test_excess_species_mechanism_rejected_without_altering_input[gas]": {
+      "weight": 0.0075,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject mechanisms beyond the supported species limit while preserving caller input. Parameter case: gas."
+    },
+    "test_reactor.py::test_excess_species_mechanism_rejected_without_altering_input[surface]": {
+      "weight": 0.0075,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject mechanisms beyond the supported species limit while preserving caller input. Parameter case: surface."
+    },
+    "test_reactor.py::test_excess_reactions_rejected_then_valid_call_recovers[gas]": {
+      "weight": 0.0075,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject mechanisms beyond the reaction limit and leave later valid calculations usable. Parameter case: gas."
+    },
+    "test_reactor.py::test_excess_reactions_rejected_then_valid_call_recovers[surface]": {
+      "weight": 0.0075,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject mechanisms beyond the reaction limit and leave later valid calculations usable. Parameter case: surface."
+    },
+    "test_reactor.py::test_loadable_unsupported_phase_rejected_then_valid_call_recovers[gas]": {
+      "weight": 0.0075,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject unsupported native phase models and recover for later supported calculations. Parameter case: gas."
+    },
+    "test_reactor.py::test_loadable_unsupported_phase_rejected_then_valid_call_recovers[surface]": {
+      "weight": 0.0075,
+      "priority": "supporting",
+      "group": "validation",
+      "rationale": "Reject unsupported native phase models and recover for later supported calculations. Parameter case: surface."
+    }
+  }
+}

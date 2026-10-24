@@ -2,7 +2,7 @@
 
 This module never executes candidate code. It authenticates test identities,
 records infrastructure errors, cleans candidate process groups, and publishes
-reward only after a complete successful pytest session.
+reward only after a complete, authenticated pytest session.
 """
 
 from __future__ import annotations
@@ -146,7 +146,7 @@ def cleanup(workspace: Path) -> None:
 
 
 def finalize(workspace: Path, pytest_status: int, stage: str, junitxml: Path) -> None:
-    """Accept only the exact full test collection and all three passing phases."""
+    """Require complete phases and aggregate independent scientific outcomes."""
     record = {
         "verifier_version": "pytest-cli-v3",
         "reward": 0,
